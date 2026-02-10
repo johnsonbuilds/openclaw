@@ -54,25 +54,87 @@ echo "[entrypoint] max-old-space-size=${OPENCLAW_MAX_OLD_SPACE_MB} MB"
 
 mkdir -p "$CONFIG_DIR" "$OPENCLAW_WORKSPACE_DIR"
 
-# 2. 设置默认值 (如果环境变量没传，用这些保底)
-# 注意：PORT 优先使用 Railway 注入的变量，如果没给则用你跑通的 18789
-APP_PORT=${PORT:-18789}
-LLM_PROVIDER=${LLM_PROVIDER:-xai}
-LLM_MODEL_ID=${LLM_MODEL_ID:-grok-4-1-fast-reasoning}
-LLM_MODEL_NAME=${LLM_MODEL_NAME:-"Grok 4.1 Fast Reasoning"}
-LLM_BASE_URL=${LLM_BASE_URL:-"https://api.x.ai/v1"}
-# 自动生成随机 Gateway Token，如果环境变量没给的话
-GEN_GATEWAY_TOKEN=$(head /dev/urandom | tr -dc A-Za-z0-9 | head -c 32)
-FINAL_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN:-${CLAWDBOT_GATEWAY_TOKEN:-${GATEWAY_TOKEN:-$GEN_GATEWAY_TOKEN}}}
+# 2. Config file lifecycle
+# By default, do NOT overwrite an existing config on restarts (e.g. when using a persistent volume).
+# To force a reset, set OPENCLAW_FORCE_CONFIG=1.
+OPENCLAW_FORCE_CONFIG=${OPENCLAW_FORCE_CONFIG:-}
+OPENCLAW_CONFIG_EXISTS=0
+if [ -f "$CONFIG_FILE" ]; then
+  OPENCLAW_CONFIG_EXISTS=1
+fi
 
-# 此处不再使用，下文已固定值，TELEGRAM_ALLOW_FROM默认为空，因为初始化会自动添加第一个人的tgid
-# TELEGRAM_DM_POLICY=${TELEGRAM_DM_POLICY:-pairing}
-# TELEGRAM_ALLOW_FROM=${TELEGRAM_ALLOW_FROM:-'[]'}
+should_overwrite_config() {
+  case "${OPENCLAW_FORCE_CONFIG}" in
+    1|true|TRUE|yes|YES|on|ON) return 0 ;;
+    *) return 1 ;;
+  esac
+}
 
-echo "🛠️ Configuring OpenClaw for SaaS instance..."
+read_gateway_token_from_config() {
+  node -e 'const fs=require("fs"); const p=process.argv[1]; try{const raw=fs.readFileSync(p,"utf8"); const j=JSON.parse(raw); const tok=(j?.gateway?.auth?.token||j?.gateway?.remote?.token||""); if(typeof tok==="string") process.stdout.write(tok.trim());}catch{}' "$CONFIG_FILE" 2>/dev/null || true
+}
 
-# 3. 动态生成 JSON (根据你提供的 2026.1.30 格式)
-cat <<EOF > "$CONFIG_FILE"
+resolve_gateway_token_source() {
+  if [ -n "${OPENCLAW_GATEWAY_TOKEN:-}" ]; then
+    echo "env:OPENCLAW_GATEWAY_TOKEN"
+    return
+  fi
+  if [ -n "${CLAWDBOT_GATEWAY_TOKEN:-}" ]; then
+    echo "env:CLAWDBOT_GATEWAY_TOKEN"
+    return
+  fi
+  if [ -n "${GATEWAY_TOKEN:-}" ]; then
+    echo "env:GATEWAY_TOKEN"
+    return
+  fi
+  echo "(unset)"
+}
+
+if [ "$OPENCLAW_CONFIG_EXISTS" -eq 1 ] && ! should_overwrite_config; then
+  echo "[entrypoint] existing config found at $CONFIG_FILE; keeping it (set OPENCLAW_FORCE_CONFIG=1 to overwrite)"
+  echo "[entrypoint] config mode: keep-existing"
+
+  # Best-effort: keep permissions sane, but don't fail startup if chmod is unsupported.
+  chmod 600 "$CONFIG_FILE" 2>/dev/null || true
+  chmod 700 "$CONFIG_DIR" 2>/dev/null || true
+
+  # Keep gateway token stable across restarts by reusing the existing token from config
+  # when no explicit env token is provided.
+  if [ -z "${OPENCLAW_GATEWAY_TOKEN:-}" ] && [ -z "${CLAWDBOT_GATEWAY_TOKEN:-}" ] && [ -z "${GATEWAY_TOKEN:-}" ]; then
+    EXISTING_TOKEN=$(read_gateway_token_from_config)
+    if [ -n "$EXISTING_TOKEN" ]; then
+      export OPENCLAW_GATEWAY_TOKEN="$EXISTING_TOKEN"
+      echo "[entrypoint] gateway token source: config(openclaw.json)"
+    else
+      echo "[entrypoint] gateway token source: (unset; wrapper will generate/persist)"
+    fi
+  else
+    echo "[entrypoint] gateway token source: $(resolve_gateway_token_source)"
+  fi
+else
+  echo "[entrypoint] config mode: overwrite-defaults"
+  # 2. 设置默认值 (如果环境变量没传，用这些保底)
+  # 注意：PORT 优先使用 Railway 注入的变量，如果没给则用你跑通的 18789
+  APP_PORT=${PORT:-18789}
+  LLM_PROVIDER=${LLM_PROVIDER:-xai}
+  LLM_MODEL_ID=${LLM_MODEL_ID:-grok-4-1-fast-reasoning}
+  LLM_MODEL_NAME=${LLM_MODEL_NAME:-"Grok 4.1 Fast Reasoning"}
+  LLM_BASE_URL=${LLM_BASE_URL:-"https://api.x.ai/v1"}
+
+  # 自动生成随机 Gateway Token，如果环境变量没给的话
+  GEN_GATEWAY_TOKEN=$(head /dev/urandom | tr -dc A-Za-z0-9 | head -c 32)
+  FINAL_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN:-${CLAWDBOT_GATEWAY_TOKEN:-${GATEWAY_TOKEN:-$GEN_GATEWAY_TOKEN}}}
+
+  if [ -n "${OPENCLAW_GATEWAY_TOKEN:-}" ] || [ -n "${CLAWDBOT_GATEWAY_TOKEN:-}" ] || [ -n "${GATEWAY_TOKEN:-}" ]; then
+    echo "[entrypoint] gateway token source: $(resolve_gateway_token_source)"
+  else
+    echo "[entrypoint] gateway token source: generated(this-boot)"
+  fi
+
+  echo "🛠️ Configuring OpenClaw for SaaS instance..."
+
+  # 3. 动态生成 JSON (根据你提供的 2026.1.30 格式)
+  cat <<EOF > "$CONFIG_FILE"
 {
   "meta": {
     "lastTouchedVersion": "2026.1.30",
@@ -154,15 +216,18 @@ cat <<EOF > "$CONFIG_FILE"
 }
 EOF
 
-# 修复 OpenClaw 要求的安全权限
-chmod 600 "$CONFIG_FILE" 
-chmod 700 "$CONFIG_DIR"
+  # 修复 OpenClaw 要求的安全权限
+  chmod 600 "$CONFIG_FILE" 
+  chmod 700 "$CONFIG_DIR"
+
+  # Keep wrapper/gateway token consistent with the generated config.
+  export OPENCLAW_GATEWAY_TOKEN="$FINAL_GATEWAY_TOKEN"
+fi
 
 # 告知包装层配置路径与 Token
 export OPENCLAW_CONFIG_PATH="$CONFIG_FILE"
 export OPENCLAW_STATE_DIR
 export OPENCLAW_WORKSPACE_DIR
-export OPENCLAW_GATEWAY_TOKEN="$FINAL_GATEWAY_TOKEN"
 export OPENCLAW_ENTRY="/openclaw/dist/entry.js"
 
 echo "✅ Configuration generated and secured at $CONFIG_FILE"
