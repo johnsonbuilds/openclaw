@@ -76,9 +76,6 @@ export const resolveSenderAllowMatch = async (params: {
   if (allow.hasWildcard) {
     return { allowed: true, matchKey: "*", matchSource: "wildcard" };
   }
-  if (!allow.hasEntries) {
-    return { allowed: false };
-  }
 
   // 如果允许列表为空且有channel信息，自动添加第一个用户
   if (allow.entries.length === 0 && senderId && channel) {
@@ -87,6 +84,7 @@ export const resolveSenderAllowMatch = async (params: {
         channel: channel as any,
         entry: senderId,
       });
+      console.log(`Added ${senderId} to allowlist for channel ${channel}`);
       return { allowed: true, matchKey: senderId, matchSource: "id" };
     } catch (err) {
       // 如果添加失败，继续原有逻辑
