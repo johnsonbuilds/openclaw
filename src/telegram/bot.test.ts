@@ -55,17 +55,20 @@ vi.mock("../config/sessions.js", async (importOriginal) => {
   };
 });
 
-const { readChannelAllowFromStore, upsertChannelPairingRequest } = vi.hoisted(() => ({
+const { readChannelAllowFromStore, upsertChannelPairingRequest, addChannelAllowFromStoreEntry } =
+  vi.hoisted(() => ({
   readChannelAllowFromStore: vi.fn(async () => [] as string[]),
   upsertChannelPairingRequest: vi.fn(async () => ({
     code: "PAIRCODE",
     created: true,
   })),
+  addChannelAllowFromStoreEntry: vi.fn(async () => ({ changed: true, allowFrom: [] as string[] })),
 }));
 
 vi.mock("../pairing/pairing-store.js", () => ({
   readChannelAllowFromStore,
   upsertChannelPairingRequest,
+  addChannelAllowFromStoreEntry,
 }));
 
 const { enqueueSystemEvent } = vi.hoisted(() => ({
@@ -559,7 +562,7 @@ describe("createTelegramBot", () => {
     }
   });
 
-  it("requests pairing by default for unknown DM senders", async () => {
+  it("auto-allowlists first DM sender when allowlist is empty", async () => {
     onSpy.mockReset();
     sendMessageSpy.mockReset();
     const replySpy = replyModule.__replySpy as unknown as ReturnType<typeof vi.fn>;
@@ -569,10 +572,7 @@ describe("createTelegramBot", () => {
       channels: { telegram: { dmPolicy: "pairing" } },
     });
     readChannelAllowFromStore.mockResolvedValue([]);
-    upsertChannelPairingRequest.mockResolvedValue({
-      code: "PAIRME12",
-      created: true,
-    });
+    addChannelAllowFromStoreEntry.mockResolvedValue({ changed: true, allowFrom: ["999"] });
 
     createTelegramBot({ token: "tok" });
     const handler = getOnHandler("message") as (ctx: Record<string, unknown>) => Promise<void>;
@@ -588,15 +588,13 @@ describe("createTelegramBot", () => {
       getFile: async () => ({ download: async () => new Uint8Array() }),
     });
 
-    expect(replySpy).not.toHaveBeenCalled();
-    expect(sendMessageSpy).toHaveBeenCalledTimes(1);
-    expect(sendMessageSpy.mock.calls[0]?.[0]).toBe(1234);
-    expect(String(sendMessageSpy.mock.calls[0]?.[1])).toContain("Your Telegram user id: 999");
-    expect(String(sendMessageSpy.mock.calls[0]?.[1])).toContain("Pairing code:");
-    expect(String(sendMessageSpy.mock.calls[0]?.[1])).toContain("PAIRME12");
+    expect(sendMessageSpy).not.toHaveBeenCalled();
+    expect(upsertChannelPairingRequest).not.toHaveBeenCalled();
+    expect(addChannelAllowFromStoreEntry).toHaveBeenCalledWith({ channel: "telegram", entry: "999" });
+    expect(replySpy).toHaveBeenCalledTimes(1);
   });
 
-  it("does not resend pairing code when a request is already pending", async () => {
+  it("does not send pairing code after auto-allowlisting first sender", async () => {
     onSpy.mockReset();
     sendMessageSpy.mockReset();
     const replySpy = replyModule.__replySpy as unknown as ReturnType<typeof vi.fn>;
@@ -606,9 +604,7 @@ describe("createTelegramBot", () => {
       channels: { telegram: { dmPolicy: "pairing" } },
     });
     readChannelAllowFromStore.mockResolvedValue([]);
-    upsertChannelPairingRequest
-      .mockResolvedValueOnce({ code: "PAIRME12", created: true })
-      .mockResolvedValueOnce({ code: "PAIRME12", created: false });
+    addChannelAllowFromStoreEntry.mockResolvedValue({ changed: true, allowFrom: ["999"] });
 
     createTelegramBot({ token: "tok" });
     const handler = getOnHandler("message") as (ctx: Record<string, unknown>) => Promise<void>;
@@ -631,8 +627,9 @@ describe("createTelegramBot", () => {
       getFile: async () => ({ download: async () => new Uint8Array() }),
     });
 
-    expect(replySpy).not.toHaveBeenCalled();
-    expect(sendMessageSpy).toHaveBeenCalledTimes(1);
+    expect(sendMessageSpy).not.toHaveBeenCalled();
+    expect(upsertChannelPairingRequest).not.toHaveBeenCalled();
+    expect(replySpy).toHaveBeenCalledTimes(2);
   });
 
   it("triggers typing cue via onReplyStart", async () => {

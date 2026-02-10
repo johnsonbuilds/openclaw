@@ -230,7 +230,7 @@ export const buildTelegramMessageContext = async ({
     }
 
     if (dmPolicy !== "open") {
-      const candidate = String(chatId);
+      const candidate = msg.from?.id ? String(msg.from.id) : String(chatId);
       const senderUsername = msg.from?.username ?? "";
       const allowMatch = await resolveSenderAllowMatch({
         allow: effectiveDmAllow,
@@ -241,8 +241,7 @@ export const buildTelegramMessageContext = async ({
       const allowMatchMeta = `matchKey=${allowMatch.matchKey ?? "none"} matchSource=${
         allowMatch.matchSource ?? "none"
       }`;
-      const allowed =
-        effectiveDmAllow.hasWildcard || (effectiveDmAllow.hasEntries && allowMatch.allowed);
+      const allowed = effectiveDmAllow.hasWildcard || allowMatch.allowed;
       if (!allowed) {
         if (dmPolicy === "pairing") {
           try {
