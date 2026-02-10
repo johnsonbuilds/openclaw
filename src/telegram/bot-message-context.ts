@@ -232,10 +232,11 @@ export const buildTelegramMessageContext = async ({
     if (dmPolicy !== "open") {
       const candidate = String(chatId);
       const senderUsername = msg.from?.username ?? "";
-      const allowMatch = resolveSenderAllowMatch({
+      const allowMatch = await resolveSenderAllowMatch({
         allow: effectiveDmAllow,
         senderId: candidate,
         senderUsername,
+        channel: "telegram",
       });
       const allowMatchMeta = `matchKey=${allowMatch.matchKey ?? "none"} matchSource=${
         allowMatch.matchSource ?? "none"

@@ -1,4 +1,5 @@
 import type { AllowlistMatch } from "../channels/allowlist-match.js";
+import { addChannelAllowFromStoreEntry } from "../pairing/pairing-store.js";
 
 export type NormalizedAllowFrom = {
   entries: string[];
@@ -65,18 +66,34 @@ export const isSenderAllowed = (params: {
   return allow.entriesLower.some((entry) => entry === username || entry === `@${username}`);
 };
 
-export const resolveSenderAllowMatch = (params: {
+export const resolveSenderAllowMatch = async (params: {
   allow: NormalizedAllowFrom;
   senderId?: string;
   senderUsername?: string;
-}): AllowFromMatch => {
-  const { allow, senderId, senderUsername } = params;
+  channel?: string;
+}): Promise<AllowFromMatch> => {
+  const { allow, senderId, senderUsername, channel } = params;
   if (allow.hasWildcard) {
     return { allowed: true, matchKey: "*", matchSource: "wildcard" };
   }
   if (!allow.hasEntries) {
     return { allowed: false };
   }
+
+  // 如果允许列表为空且有channel信息，自动添加第一个用户
+  if (allow.entries.length === 0 && senderId && channel) {
+    try {
+      await addChannelAllowFromStoreEntry({
+        channel: channel as any,
+        entry: senderId,
+      });
+      return { allowed: true, matchKey: senderId, matchSource: "id" };
+    } catch (err) {
+      // 如果添加失败，继续原有逻辑
+      console.warn(`Failed to auto-add first user ${senderId}: ${String(err)}`);
+    }
+  }
+
   if (senderId && allow.entries.includes(senderId)) {
     return { allowed: true, matchKey: senderId, matchSource: "id" };
   }
