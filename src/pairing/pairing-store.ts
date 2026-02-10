@@ -225,10 +225,13 @@ export async function readChannelAllowFromStore(
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<string[]> {
   const filePath = resolveAllowFromPath(channel, env);
-  const { value } = await readJsonFile<AllowFromStore>(filePath, {
+  const { value, exists } = await readJsonFile<AllowFromStore>(filePath, {
     version: 1,
     allowFrom: [],
   });
+  if (!exists) {
+    console.warn(`Failed to read allowlist from ${filePath}: file not found or unreadable`);
+  }
   const list = Array.isArray(value.allowFrom) ? value.allowFrom : [];
   return list.map((v) => normalizeAllowEntry(channel, String(v))).filter(Boolean);
 }

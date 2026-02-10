@@ -39,7 +39,7 @@ if [ -z "$OPENCLAW_MAX_OLD_SPACE_MB" ]; then
     if [ "$calc" -gt 768 ]; then calc=768; fi
     OPENCLAW_MAX_OLD_SPACE_MB=$calc
   else
-    OPENCLAW_MAX_OLD_SPACE_MB=640
+    OPENCLAW_MAX_OLD_SPACE_MB=1024
   fi
 fi
 
@@ -65,11 +65,9 @@ LLM_BASE_URL=${LLM_BASE_URL:-"https://api.x.ai/v1"}
 GEN_GATEWAY_TOKEN=$(head /dev/urandom | tr -dc A-Za-z0-9 | head -c 32)
 FINAL_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN:-${CLAWDBOT_GATEWAY_TOKEN:-${GATEWAY_TOKEN:-$GEN_GATEWAY_TOKEN}}}
 
-# Telegram security defaults
-# dmPolicy: Use "pairing" for security (not "open") unless explicitly set to "open"
-# allowFrom: Use allowlist from env var, or default to ["*"] for backward compat
-TELEGRAM_DM_POLICY=${TELEGRAM_DM_POLICY:-pairing}
-TELEGRAM_ALLOW_FROM=${TELEGRAM_ALLOW_FROM:-'["*"]'}
+# 此处不再使用，下文已固定值，TELEGRAM_ALLOW_FROM默认为空，因为初始化会自动添加第一个人的tgid
+# TELEGRAM_DM_POLICY=${TELEGRAM_DM_POLICY:-pairing}
+# TELEGRAM_ALLOW_FROM=${TELEGRAM_ALLOW_FROM:-'[]'}
 
 echo "🛠️ Configuring OpenClaw for SaaS instance..."
 
@@ -118,8 +116,8 @@ cat <<EOF > "$CONFIG_FILE"
   "channels": {
     "telegram": {
       "enabled": true,
-      "dmPolicy": "$TELEGRAM_DM_POLICY",
-      "allowFrom": $TELEGRAM_ALLOW_FROM,
+      "dmPolicy": "pairing",
+      "allowFrom": [],
       "botToken": "$TELEGRAM_TOKEN",
       "groupPolicy": "allowlist",
       "streamMode": "partial"
