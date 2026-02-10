@@ -2,7 +2,7 @@
 set -e
 
 # 1. 定义路径与运行参数
-OPENCLAW_STATE_DIR=${OPENCLAW_STATE_DIR:-/data/.openclaw}
+OPENCLAW_STATE_DIR=${OPENCLAW_STATE_DIR? "Error: OPENCLAW_STATE_DIR environment variable is required but not set"}
 OPENCLAW_WORKSPACE_DIR=${OPENCLAW_WORKSPACE_DIR:-/data/workspace}
 CONFIG_DIR="$OPENCLAW_STATE_DIR"
 CONFIG_FILE="$CONFIG_DIR/openclaw.json"
