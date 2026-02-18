@@ -88,14 +88,17 @@ function buildToolsEntries(tools: AgentTool[]): SessionSystemPromptReport["tools
 }
 
 function extractToolListText(systemPrompt: string): string {
-  const markerA = "Tool names are case-sensitive. Call tools exactly as listed.\n";
-  const markerB =
-    "\nTOOLS.md does not control tool availability; it is user guidance for how to use external tools.";
+  const markerA = "## Tools\n";
+  const markerB = "\n## Rules\n";
   const extracted = extractBetween(systemPrompt, markerA, markerB);
-  if (!extracted.found) {
+  if (extracted.found) {
+    return extracted.text.replace(markerA, "").trim();
+  }
+  const fallback = extractBetween(systemPrompt, markerA, "\n## Safety\n");
+  if (!fallback.found) {
     return "";
   }
-  return extracted.text.replace(markerA, "").trim();
+  return fallback.text.replace(markerA, "").trim();
 }
 
 export function buildSystemPromptReport(params: {
@@ -118,7 +121,7 @@ export function buildSystemPromptReport(params: {
   const projectContext = extractBetween(
     systemPrompt,
     "\n# Project Context\n",
-    "\n## Silent Replies\n",
+    "\n## Runtime\n",
   );
   const projectContextChars = projectContext.text.length;
   const toolListText = extractToolListText(systemPrompt);
