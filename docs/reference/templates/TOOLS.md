@@ -6,11 +6,41 @@ read_when:
 
 # TOOLS.md - Local Notes
 
-Keep this file short; it may be injected into prompts.
+Skills define _how_ tools work. This file is for _your_ specifics — the stuff that's unique to your setup.
 
-## Local Notes
+## What Goes Here
 
-- SSH aliases/hosts
-- Device/camera nicknames
-- Preferred TTS voice/speaker
-- Any environment-specific conventions
+Things like:
+
+- Camera names and locations
+- SSH hosts and aliases
+- Preferred voices for TTS
+- Speaker/room names
+- Device nicknames
+- Anything environment-specific
+
+## Examples
+
+```markdown
+### Cameras
+
+- living-room → Main area, 180° wide angle
+- front-door → Entrance, motion-triggered
+
+### SSH
+
+- home-server → 192.168.1.100, user: admin
+
+### TTS
+
+- Preferred voice: "Nova" (warm, slightly British)
+- Default speaker: Kitchen HomePod
+```
+
+## Why Separate?
+
+Skills are shared. Your setup is yours. Keeping them apart means you can update skills without losing your notes, and share skills without leaking your infrastructure.
+
+---
+
+Add whatever helps you do your job. This is your cheat sheet.

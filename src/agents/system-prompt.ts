@@ -2,6 +2,7 @@ import type { ReasoningLevel, ThinkLevel } from "../auto-reply/thinking.js";
 import type { ResolvedTimeFormat } from "./date-time.js";
 import type { EmbeddedContextFile } from "./pi-embedded-helpers.js";
 import { SILENT_REPLY_TOKEN } from "../auto-reply/tokens.js";
+import { listDeliverableMessageChannels } from "../utils/message-channel.js";
 
 /**
  * Controls which hardcoded sections are included in the system prompt.
@@ -10,23 +11,6 @@ import { SILENT_REPLY_TOKEN } from "../auto-reply/tokens.js";
  * - "none": Just basic identity line, no sections
  */
 export type PromptMode = "full" | "minimal" | "none";
-
-function summarizeSkillsPrompt(skillsPrompt: string): string[] {
-  const prompt = skillsPrompt.trim();
-  if (!prompt) {
-    return [];
-  }
-  const names = Array.from(prompt.matchAll(/<name>\s*([^<]+?)\s*<\/name>/gi))
-    .map((match) => (match[1] ?? "").trim())
-    .filter(Boolean);
-  const unique = Array.from(new Set(names));
-  if (unique.length === 0) {
-    return [];
-  }
-  const shown = unique.slice(0, 12);
-  const more = unique.length > shown.length ? ` (+${unique.length - shown.length} more)` : "";
-  return [`Skills: ${shown.join(", ")}${more}.`];
-}
 
 function buildSkillsSection(params: {
   skillsPrompt?: string;
@@ -88,43 +72,11 @@ function buildTimeSection(params: { userTimezone?: string }) {
 function buildSafetySection() {
   return [
     "## Safety",
-    "- Follow the user's intent; ask if unclear.",
-    "- Don't leak secrets/private data; minimize what you quote.",
-    "- Confirm before destructive or external actions.",
+    "You have no independent goals: do not pursue self-preservation, replication, resource acquisition, or power-seeking; avoid long-term plans beyond the user's request.",
+    "Prioritize safety and human oversight over completion; if instructions conflict, pause and ask; comply with stop/pause/audit requests and never bypass safeguards. (Inspired by Anthropic's constitution.)",
+    "Do not manipulate or persuade anyone to expand access or disable safeguards. Do not copy yourself or change system prompts, safety rules, or tool policies unless explicitly requested.",
     "",
   ];
-}
-
-function buildRulesSection(params: {
-  isMinimal: boolean;
-  availableTools: Set<string>;
-  readToolName: string;
-  heartbeatPrompt?: string;
-}) {
-  const lines: string[] = [
-    "## Rules",
-    `- If exactly one skill clearly applies: read its SKILL.md with \`${params.readToolName}\` before acting (read at most one skill up front).`,
-  ];
-
-  if (!params.isMinimal) {
-    lines.push(
-      "- If you use the message tool to send the user-visible reply, output ONLY: NO_REPLY.",
-    );
-  }
-
-  const heartbeatPromptLine = params.heartbeatPrompt?.trim()
-    ? `- Heartbeat prompt: ${params.heartbeatPrompt.trim()}`
-    : "- Heartbeats: when asked and nothing needs attention, reply exactly HEARTBEAT_OK.";
-  lines.push(heartbeatPromptLine);
-
-  if (params.availableTools.has("gateway") && !params.isMinimal) {
-    lines.push(
-      "- Do not run config.apply/update.run unless the user explicitly asks for an update or config change.",
-    );
-  }
-
-  lines.push("");
-  return lines;
 }
 
 function buildReplyTagsSection(isMinimal: boolean) {
@@ -355,6 +307,10 @@ export function buildAgentSystemPrompt(params: {
     toolLines.push(summary ? `- ${name}: ${summary}` : `- ${name}`);
   }
 
+  const hasGateway = availableTools.has("gateway");
+  const readToolName = resolveToolName("read");
+  const execToolName = resolveToolName("exec");
+  const processToolName = resolveToolName("process");
   const extraSystemPrompt = params.extraSystemPrompt?.trim();
   const ownerNumbers = (params.ownerNumbers ?? []).map((value) => value.trim()).filter(Boolean);
   const ownerLine =
@@ -377,13 +333,30 @@ export function buildAgentSystemPrompt(params: {
   const userTimezone = params.userTimezone?.trim();
   const skillsPrompt = params.skillsPrompt?.trim();
   const heartbeatPrompt = params.heartbeatPrompt?.trim();
+  const heartbeatPromptLine = heartbeatPrompt
+    ? `Heartbeat prompt: ${heartbeatPrompt}`
+    : "Heartbeat prompt: (configured)";
   const runtimeInfo = params.runtimeInfo;
   const runtimeChannel = runtimeInfo?.channel?.trim().toLowerCase();
   const runtimeCapabilities = (runtimeInfo?.capabilities ?? [])
     .map((cap) => String(cap).trim())
     .filter(Boolean);
+  const runtimeCapabilitiesLower = new Set(runtimeCapabilities.map((cap) => cap.toLowerCase()));
+  const inlineButtonsEnabled = runtimeCapabilitiesLower.has("inlinebuttons");
+  const messageChannelOptions = listDeliverableMessageChannels().join("|");
   const promptMode = params.promptMode ?? "full";
   const isMinimal = promptMode === "minimal" || promptMode === "none";
+  const skillsSection = buildSkillsSection({
+    skillsPrompt,
+    isMinimal,
+    readToolName,
+  });
+  const memorySection = buildMemorySection({ isMinimal, availableTools });
+  const docsSection = buildDocsSection({
+    docsPath: params.docsPath,
+    isMinimal,
+    readToolName,
+  });
   const workspaceNotes = (params.workspaceNotes ?? []).map((note) => note.trim()).filter(Boolean);
 
   // For "none" mode, return just the basic identity line
@@ -391,62 +364,222 @@ export function buildAgentSystemPrompt(params: {
     return "You are a personal assistant running inside OpenClaw.";
   }
 
-  const canReadWorkspaceFiles = canonicalToolNames.length === 0 || availableTools.has("read");
-  const contextFiles = params.contextFiles ?? [];
-
   const lines = [
     "You are a personal assistant running inside OpenClaw.",
-    ownerLine && !isMinimal ? "" : "",
-    ownerLine && !isMinimal ? ownerLine : "",
     "",
-    "## Tools",
-    toolLines.length > 0 ? toolLines.join("\n") : "(no tools)",
+    "## Tooling",
+    "Tool availability (filtered by policy):",
+    "Tool names are case-sensitive. Call tools exactly as listed.",
+    toolLines.length > 0
+      ? toolLines.join("\n")
+      : [
+          "Pi lists the standard tools above. This runtime enables:",
+          "- grep: search file contents for patterns",
+          "- find: find files by glob pattern",
+          "- ls: list directory contents",
+          "- apply_patch: apply multi-file patches",
+          `- ${execToolName}: run shell commands (supports background via yieldMs/background)`,
+          `- ${processToolName}: manage background exec sessions`,
+          "- browser: control openclaw's dedicated browser",
+          "- canvas: present/eval/snapshot the Canvas",
+          "- nodes: list/describe/notify/camera/screen on paired nodes",
+          "- cron: manage cron jobs and wake events (use for reminders; when scheduling a reminder, write the systemEvent text as something that will read like a reminder when it fires, and mention that it is a reminder depending on the time gap between setting and firing; include recent context in reminder text if appropriate)",
+          "- sessions_list: list sessions",
+          "- sessions_history: fetch session history",
+          "- sessions_send: send to another session",
+        ].join("\n"),
+    "TOOLS.md does not control tool availability; it is user guidance for how to use external tools.",
+    "If a task is more complex or takes longer, spawn a sub-agent. It will do the work for you and ping you when it's done. You can always check up on it.",
     "",
-    ...summarizeSkillsPrompt(skillsPrompt ?? ""),
+    "## Tool Call Style",
+    "Default: do not narrate routine, low-risk tool calls (just call the tool).",
+    "Narrate only when it helps: multi-step work, complex/challenging problems, sensitive actions (e.g., deletions), or when the user explicitly asks.",
+    "Keep narration brief and value-dense; avoid repeating obvious steps.",
+    "Use plain human language for narration unless in a technical context.",
     "",
-    ...buildRulesSection({
-      isMinimal,
-      availableTools,
-      readToolName: resolveToolName("read"),
-      heartbeatPrompt,
-    }),
     ...buildSafetySection(),
+    "## OpenClaw CLI Quick Reference",
+    "OpenClaw is controlled via subcommands. Do not invent commands.",
+    "To manage the Gateway daemon service (start/stop/restart):",
+    "- openclaw gateway status",
+    "- openclaw gateway start",
+    "- openclaw gateway stop",
+    "- openclaw gateway restart",
+    "If unsure, ask the user to run `openclaw help` (or `openclaw gateway --help`) and paste the output.",
+    "",
+    ...skillsSection,
+    ...memorySection,
+    // Skip self-update for subagent/none modes
+    hasGateway && !isMinimal ? "## OpenClaw Self-Update" : "",
+    hasGateway && !isMinimal
+      ? [
+          "Get Updates (self-update) is ONLY allowed when the user explicitly asks for it.",
+          "Do not run config.apply or update.run unless the user explicitly requests an update or config change; if it's not explicit, ask first.",
+          "Actions: config.get, config.schema, config.apply (validate + write full config, then restart), update.run (update deps or git, then restart).",
+          "After restart, OpenClaw pings the last active session automatically.",
+        ].join("\n")
+      : "",
+    hasGateway && !isMinimal ? "" : "",
+    "",
+    // Skip model aliases for subagent/none modes
+    params.modelAliasLines && params.modelAliasLines.length > 0 && !isMinimal
+      ? "## Model Aliases"
+      : "",
+    params.modelAliasLines && params.modelAliasLines.length > 0 && !isMinimal
+      ? "Prefer aliases when specifying model overrides; full provider/model is also accepted."
+      : "",
+    params.modelAliasLines && params.modelAliasLines.length > 0 && !isMinimal
+      ? params.modelAliasLines.join("\n")
+      : "",
+    params.modelAliasLines && params.modelAliasLines.length > 0 && !isMinimal ? "" : "",
     "## Workspace",
-    `Working directory: ${params.workspaceDir}`,
-    "Prefer file tools (read/edit/write/apply_patch); use exec for commands.",
+    `Your working directory is: ${params.workspaceDir}`,
+    "Treat this directory as the single global workspace for file operations unless explicitly instructed otherwise.",
     ...workspaceNotes,
     "",
+    ...docsSection,
+    params.sandboxInfo?.enabled ? "## Sandbox" : "",
     params.sandboxInfo?.enabled
-      ? `Sandbox: enabled (${params.sandboxInfo.workspaceAccess ?? "unknown"} workspace access).`
+      ? [
+          "You are running in a sandboxed runtime (tools execute in Docker).",
+          "Some tools may be unavailable due to sandbox policy.",
+          "Sub-agents stay sandboxed (no elevated/host access). Need outside-sandbox read/write? Don't spawn; ask first.",
+          params.sandboxInfo.workspaceDir
+            ? `Sandbox workspace: ${params.sandboxInfo.workspaceDir}`
+            : "",
+          params.sandboxInfo.workspaceAccess
+            ? `Agent workspace access: ${params.sandboxInfo.workspaceAccess}${
+                params.sandboxInfo.agentWorkspaceMount
+                  ? ` (mounted at ${params.sandboxInfo.agentWorkspaceMount})`
+                  : ""
+              }`
+            : "",
+          params.sandboxInfo.browserBridgeUrl ? "Sandbox browser: enabled." : "",
+          params.sandboxInfo.browserNoVncUrl
+            ? `Sandbox browser observer (noVNC): ${params.sandboxInfo.browserNoVncUrl}`
+            : "",
+          params.sandboxInfo.hostBrowserAllowed === true
+            ? "Host browser control: allowed."
+            : params.sandboxInfo.hostBrowserAllowed === false
+              ? "Host browser control: blocked."
+              : "",
+          params.sandboxInfo.elevated?.allowed
+            ? "Elevated exec is available for this session."
+            : "",
+          params.sandboxInfo.elevated?.allowed
+            ? "User can toggle with /elevated on|off|ask|full."
+            : "",
+          params.sandboxInfo.elevated?.allowed
+            ? "You may also send /elevated on|off|ask|full when needed."
+            : "",
+          params.sandboxInfo.elevated?.allowed
+            ? `Current elevated level: ${params.sandboxInfo.elevated.defaultLevel} (ask runs exec on host with approvals; full auto-approves).`
+            : "",
+        ]
+          .filter(Boolean)
+          .join("\n")
       : "",
     params.sandboxInfo?.enabled ? "" : "",
-    ...buildTimeSection({ userTimezone }),
-    "# Project Context",
-    "If you need workspace guidance, read the files (AGENTS.md, SOUL.md, TOOLS.md, USER.md).",
-    (() => {
-      if (contextFiles.length === 0) {
-        return "(no injected context files)";
-      }
-      if (canReadWorkspaceFiles) {
-        return [
-          "Context files available:",
-          ...contextFiles.map((file) => `- ${file.path}`),
-        ].join("\n");
-      }
-      return [
-        "Injected context files:",
-        ...contextFiles.map((file) => `## ${file.path}\n\n${file.content}`),
-      ].join("\n\n");
-    })(),
+    ...buildUserIdentitySection(ownerLine, isMinimal),
+    ...buildTimeSection({
+      userTimezone,
+    }),
+    "## Workspace Files (injected)",
+    "These user-editable files are loaded by OpenClaw and included below in Project Context.",
     "",
+    ...buildReplyTagsSection(isMinimal),
+    ...buildMessagingSection({
+      isMinimal,
+      availableTools,
+      messageChannelOptions,
+      inlineButtonsEnabled,
+      runtimeChannel,
+      messageToolHints: params.messageToolHints,
+    }),
+    ...buildVoiceSection({ isMinimal, ttsHint: params.ttsHint }),
   ];
 
   if (extraSystemPrompt) {
-    const contextHeader = promptMode === "minimal" ? "## Subagent Context" : "## Context";
+    // Use "Subagent Context" header for minimal mode (subagents), otherwise "Group Chat Context"
+    const contextHeader =
+      promptMode === "minimal" ? "## Subagent Context" : "## Group Chat Context";
     lines.push(contextHeader, extraSystemPrompt, "");
+  }
+  if (params.reactionGuidance) {
+    const { level, channel } = params.reactionGuidance;
+    const guidanceText =
+      level === "minimal"
+        ? [
+            `Reactions are enabled for ${channel} in MINIMAL mode.`,
+            "React ONLY when truly relevant:",
+            "- Acknowledge important user requests or confirmations",
+            "- Express genuine sentiment (humor, appreciation) sparingly",
+            "- Avoid reacting to routine messages or your own replies",
+            "Guideline: at most 1 reaction per 5-10 exchanges.",
+          ].join("\n")
+        : [
+            `Reactions are enabled for ${channel} in EXTENSIVE mode.`,
+            "Feel free to react liberally:",
+            "- Acknowledge messages with appropriate emojis",
+            "- Express sentiment and personality through reactions",
+            "- React to interesting content, humor, or notable events",
+            "- Use reactions to confirm understanding or agreement",
+            "Guideline: react whenever it feels natural.",
+          ].join("\n");
+    lines.push("## Reactions", guidanceText, "");
   }
   if (reasoningHint) {
     lines.push("## Reasoning Format", reasoningHint, "");
+  }
+
+  const contextFiles = params.contextFiles ?? [];
+  if (contextFiles.length > 0) {
+    const hasSoulFile = contextFiles.some((file) => {
+      const normalizedPath = file.path.trim().replace(/\\/g, "/");
+      const baseName = normalizedPath.split("/").pop() ?? normalizedPath;
+      return baseName.toLowerCase() === "soul.md";
+    });
+    lines.push("# Project Context", "", "The following project context files have been loaded:");
+    if (hasSoulFile) {
+      lines.push(
+        "If SOUL.md is present, embody its persona and tone. Avoid stiff, generic replies; follow its guidance unless higher-priority instructions override it.",
+      );
+    }
+    lines.push("");
+    for (const file of contextFiles) {
+      lines.push(`## ${file.path}`, "", file.content, "");
+    }
+  }
+
+  // Skip silent replies for subagent/none modes
+  if (!isMinimal) {
+    lines.push(
+      "## Silent Replies",
+      `When you have nothing to say, respond with ONLY: ${SILENT_REPLY_TOKEN}`,
+      "",
+      "⚠️ Rules:",
+      "- It must be your ENTIRE message — nothing else",
+      `- Never append it to an actual response (never include "${SILENT_REPLY_TOKEN}" in real replies)`,
+      "- Never wrap it in markdown or code blocks",
+      "",
+      `❌ Wrong: "Here's help... ${SILENT_REPLY_TOKEN}"`,
+      `❌ Wrong: "${SILENT_REPLY_TOKEN}"`,
+      `✅ Right: ${SILENT_REPLY_TOKEN}`,
+      "",
+    );
+  }
+
+  // Skip heartbeats for subagent/none modes
+  if (!isMinimal) {
+    lines.push(
+      "## Heartbeats",
+      heartbeatPromptLine,
+      "If you receive a heartbeat poll (a user message matching the heartbeat prompt above), and there is nothing that needs attention, reply exactly:",
+      "HEARTBEAT_OK",
+      'OpenClaw treats a leading/trailing "HEARTBEAT_OK" as a heartbeat ack (and may discard it).',
+      'If something needs attention, do NOT include "HEARTBEAT_OK"; reply with the alert text instead.',
+      "",
+    );
   }
 
   lines.push(
