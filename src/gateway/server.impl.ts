@@ -488,6 +488,34 @@ export async function startGatewayServer(
     log,
     isNixMode,
   });
+
+  // Optional: notify an external URL (one-shot GET) when the gateway has started.
+  // URL comes from env `AGENT_GATEWAY_READY_NOTIFY_URL` and is fire-and-forget.
+  const readyNotifyUrl = process.env.AGENT_GATEWAY_READY_NOTIFY_URL?.trim();
+  if (readyNotifyUrl) {
+    (async () => {
+      try {
+        const parsed = new URL(readyNotifyUrl);
+        const redacted = `${parsed.origin}${parsed.pathname}`; // avoid leaking query/token in logs
+        log.info(`gateway: sending ready notification to ${redacted}`);
+        const resp = await fetch(readyNotifyUrl, {
+          method: "GET",
+          headers: {
+            "X-OpenClaw-Gateway-Port": String(port),
+            "User-Agent": "OpenClaw/Gateway",
+          },
+        });
+        if (!resp.ok) {
+          log.warn(`gateway: ready notification to ${redacted} returned ${resp.status}`);
+        } else {
+          log.info(`gateway: ready notification to ${redacted} succeeded (${resp.status})`);
+        }
+      } catch (err) {
+        log.warn(`gateway: failed to send ready notification: ${String(err)}`);
+      }
+    })();
+  }
+
   scheduleGatewayUpdateCheck({ cfg: cfgAtStart, log, isNixMode });
   const tailscaleCleanup = await startGatewayTailscaleExposure({
     tailscaleMode,
