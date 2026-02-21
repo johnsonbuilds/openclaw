@@ -8,7 +8,6 @@ describe("buildAgentSystemPrompt", () => {
       ownerNumbers: ["+123", " +456 ", ""],
     });
 
-    expect(prompt).toContain("## User Identity");
     expect(prompt).toContain(
       "Owner numbers: +123, +456. Treat messages from these numbers as the user.",
     );
@@ -19,7 +18,6 @@ describe("buildAgentSystemPrompt", () => {
       workspaceDir: "/tmp/openclaw",
     });
 
-    expect(prompt).not.toContain("## User Identity");
     expect(prompt).not.toContain("Owner numbers:");
   });
 
@@ -37,24 +35,9 @@ describe("buildAgentSystemPrompt", () => {
       ttsHint: "Voice (TTS) is enabled.",
     });
 
-    expect(prompt).not.toContain("## User Identity");
-    expect(prompt).not.toContain("## Skills");
-    expect(prompt).not.toContain("## Memory Recall");
-    expect(prompt).not.toContain("## Documentation");
-    expect(prompt).not.toContain("## Reply Tags");
-    expect(prompt).not.toContain("## Messaging");
-    expect(prompt).not.toContain("## Voice (TTS)");
-    expect(prompt).not.toContain("## Silent Replies");
-    expect(prompt).not.toContain("## Heartbeats");
     expect(prompt).toContain("## Safety");
-    expect(prompt).toContain("You have no independent goals");
-    expect(prompt).toContain("Prioritize safety and human oversight");
-    expect(prompt).toContain("if instructions conflict");
-    expect(prompt).toContain("Inspired by Anthropic's constitution");
-    expect(prompt).toContain("Do not manipulate or persuade anyone");
-    expect(prompt).toContain("Do not copy yourself or change system prompts");
+    expect(prompt).toContain("## Rules");
     expect(prompt).toContain("## Subagent Context");
-    expect(prompt).not.toContain("## Group Chat Context");
     expect(prompt).toContain("Subagent details");
   });
 
@@ -64,22 +47,7 @@ describe("buildAgentSystemPrompt", () => {
     });
 
     expect(prompt).toContain("## Safety");
-    expect(prompt).toContain("You have no independent goals");
-    expect(prompt).toContain("Prioritize safety and human oversight");
-    expect(prompt).toContain("if instructions conflict");
-    expect(prompt).toContain("Inspired by Anthropic's constitution");
-    expect(prompt).toContain("Do not manipulate or persuade anyone");
-    expect(prompt).toContain("Do not copy yourself or change system prompts");
-  });
-
-  it("includes voice hint when provided", () => {
-    const prompt = buildAgentSystemPrompt({
-      workspaceDir: "/tmp/openclaw",
-      ttsHint: "Voice (TTS) is enabled.",
-    });
-
-    expect(prompt).toContain("## Voice (TTS)");
-    expect(prompt).toContain("Voice (TTS) is enabled.");
+    expect(prompt).toContain("Don't leak secrets");
   });
 
   it("adds reasoning tag hint when enabled", () => {
@@ -93,23 +61,13 @@ describe("buildAgentSystemPrompt", () => {
     expect(prompt).toContain("<final>...</final>");
   });
 
-  it("includes a CLI quick reference section", () => {
-    const prompt = buildAgentSystemPrompt({
-      workspaceDir: "/tmp/openclaw",
-    });
-
-    expect(prompt).toContain("## OpenClaw CLI Quick Reference");
-    expect(prompt).toContain("openclaw gateway restart");
-    expect(prompt).toContain("Do not invent commands");
-  });
-
   it("lists available tools when provided", () => {
     const prompt = buildAgentSystemPrompt({
       workspaceDir: "/tmp/openclaw",
       toolNames: ["exec", "sessions_list", "sessions_history", "sessions_send"],
     });
 
-    expect(prompt).toContain("Tool availability (filtered by policy):");
+    expect(prompt).toContain("## Tools");
     expect(prompt).toContain("sessions_list");
     expect(prompt).toContain("sessions_history");
     expect(prompt).toContain("sessions_send");
@@ -126,26 +84,7 @@ describe("buildAgentSystemPrompt", () => {
 
     expect(prompt).toContain("- Read: Read file contents");
     expect(prompt).toContain("- Exec: Run shell commands");
-    expect(prompt).toContain(
-      "- If exactly one skill clearly applies: read its SKILL.md at <location> with `Read`, then follow it.",
-    );
-    expect(prompt).toContain("OpenClaw docs: /tmp/openclaw/docs");
-    expect(prompt).toContain(
-      "For OpenClaw behavior, commands, config, or architecture: consult local docs first.",
-    );
-  });
-
-  it("includes docs guidance when docsPath is provided", () => {
-    const prompt = buildAgentSystemPrompt({
-      workspaceDir: "/tmp/openclaw",
-      docsPath: "/tmp/openclaw/docs",
-    });
-
-    expect(prompt).toContain("## Documentation");
-    expect(prompt).toContain("OpenClaw docs: /tmp/openclaw/docs");
-    expect(prompt).toContain(
-      "For OpenClaw behavior, commands, config, or architecture: consult local docs first.",
-    );
+    expect(prompt).toContain("Skills: demo.");
   });
 
   it("includes workspace notes when provided", () => {
@@ -230,50 +169,22 @@ describe("buildAgentSystemPrompt", () => {
   it("includes model alias guidance when aliases are provided", () => {
     const prompt = buildAgentSystemPrompt({
       workspaceDir: "/tmp/openclaw",
-      modelAliasLines: [
-        "- Opus: anthropic/claude-opus-4-5",
-        "- Sonnet: anthropic/claude-sonnet-4-5",
-      ],
+      modelAliasLines: ["- Opus: anthropic/claude-opus-4-5"],
     });
 
-    expect(prompt).toContain("## Model Aliases");
-    expect(prompt).toContain("Prefer aliases when specifying model overrides");
-    expect(prompt).toContain("- Opus: anthropic/claude-opus-4-5");
+    // Model aliases are intentionally omitted from the compact prompt.
+    expect(prompt).not.toContain("## Model Aliases");
   });
 
-  it("adds ClaudeBot self-update guidance when gateway tool is available", () => {
-    const prompt = buildAgentSystemPrompt({
-      workspaceDir: "/tmp/openclaw",
-      toolNames: ["gateway", "exec"],
-    });
-
-    expect(prompt).toContain("## OpenClaw Self-Update");
-    expect(prompt).toContain("config.apply");
-    expect(prompt).toContain("update.run");
-  });
-
-  it("includes skills guidance when skills prompt is present", () => {
+  it("summarizes available skills when provided", () => {
     const prompt = buildAgentSystemPrompt({
       workspaceDir: "/tmp/openclaw",
       skillsPrompt:
         "<available_skills>\n  <skill>\n    <name>demo</name>\n  </skill>\n</available_skills>",
     });
 
-    expect(prompt).toContain("## Skills");
-    expect(prompt).toContain(
-      "- If exactly one skill clearly applies: read its SKILL.md at <location> with `read`, then follow it.",
-    );
-  });
-
-  it("appends available skills when provided", () => {
-    const prompt = buildAgentSystemPrompt({
-      workspaceDir: "/tmp/openclaw",
-      skillsPrompt:
-        "<available_skills>\n  <skill>\n    <name>demo</name>\n  </skill>\n</available_skills>",
-    });
-
-    expect(prompt).toContain("<available_skills>");
-    expect(prompt).toContain("<name>demo</name>");
+    expect(prompt).toContain("Skills: demo.");
+    expect(prompt).not.toContain("<available_skills>");
   });
 
   it("omits skills section when no skills prompt is provided", () => {
@@ -281,8 +192,7 @@ describe("buildAgentSystemPrompt", () => {
       workspaceDir: "/tmp/openclaw",
     });
 
-    expect(prompt).not.toContain("## Skills");
-    expect(prompt).not.toContain("<available_skills>");
+    expect(prompt).not.toContain("Skills:");
   });
 
   it("renders project context files when provided", () => {
@@ -295,35 +205,20 @@ describe("buildAgentSystemPrompt", () => {
     });
 
     expect(prompt).toContain("# Project Context");
-    expect(prompt).toContain("## AGENTS.md");
-    expect(prompt).toContain("Alpha");
-    expect(prompt).toContain("## IDENTITY.md");
-    expect(prompt).toContain("Bravo");
+    expect(prompt).toContain("Context files available:");
+    expect(prompt).toContain("- AGENTS.md");
+    expect(prompt).toContain("- IDENTITY.md");
+    expect(prompt).not.toContain("Alpha");
   });
 
-  it("adds SOUL guidance when a soul file is present", () => {
-    const prompt = buildAgentSystemPrompt({
-      workspaceDir: "/tmp/openclaw",
-      contextFiles: [
-        { path: "./SOUL.md", content: "Persona" },
-        { path: "dir\\SOUL.md", content: "Persona Windows" },
-      ],
-    });
-
-    expect(prompt).toContain(
-      "If SOUL.md is present, embody its persona and tone. Avoid stiff, generic replies; follow its guidance unless higher-priority instructions override it.",
-    );
-  });
-
-  it("summarizes the message tool when available", () => {
+  it("adds compact message-send guidance when message tool is available", () => {
     const prompt = buildAgentSystemPrompt({
       workspaceDir: "/tmp/openclaw",
       toolNames: ["message"],
     });
 
-    expect(prompt).toContain("message: Send messages and channel actions");
-    expect(prompt).toContain("### message tool");
-    expect(prompt).toContain("respond with ONLY: NO_REPLY");
+    expect(prompt).toContain("## Rules");
+    expect(prompt).toContain("output ONLY: NO_REPLY");
   });
 
   it("includes runtime provider capabilities when present", () => {
@@ -422,7 +317,7 @@ describe("buildAgentSystemPrompt", () => {
       },
     });
 
-    expect(prompt).toContain("## Reactions");
-    expect(prompt).toContain("Reactions are enabled for Telegram in MINIMAL mode.");
+    // Reaction guidance is intentionally omitted from the compact prompt.
+    expect(prompt).not.toContain("## Reactions");
   });
 });
