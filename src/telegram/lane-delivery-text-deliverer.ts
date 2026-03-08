@@ -316,19 +316,6 @@ export function createLaneTextDeliverer(params: CreateLaneTextDelivererParams) {
     if (!archivedPreview) {
       return undefined;
     }
-    const hasOnlyTextFinal =
-      text.length > 0 &&
-      !payload.isError &&
-      !payload.mediaUrl &&
-      (payload.mediaUrls?.length ?? 0) === 0 &&
-      !(previewButtons && previewButtons.length > 0);
-    if (hasOnlyTextFinal && archivedPreview.textSnapshot === text) {
-      params.log(
-        "telegram: answer archived preview already matches final text; keeping existing preview",
-      );
-      params.markDelivered();
-      return "preview-finalized";
-    }
     if (canEditViaPreview) {
       const finalized = await tryUpdatePreviewForLane({
         lane,

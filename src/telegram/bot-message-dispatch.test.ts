@@ -978,44 +978,6 @@ describe("dispatchTelegramMessage draft streaming", () => {
     expect(deliverReplies).not.toHaveBeenCalled();
   });
 
-  it("keeps an identical archived answer preview instead of sending a duplicate fallback final", async () => {
-    let answerMessageId: number | undefined = 1001;
-    const answerDraftStream = {
-      update: vi.fn(),
-      flush: vi.fn().mockResolvedValue(undefined),
-      messageId: vi.fn().mockImplementation(() => answerMessageId),
-      clear: vi.fn().mockResolvedValue(undefined),
-      stop: vi.fn().mockResolvedValue(undefined),
-      forceNewMessage: vi.fn().mockImplementation(() => {
-        answerMessageId = undefined;
-      }),
-    };
-    const reasoningDraftStream = createDraftStream();
-    createTelegramDraftStream
-      .mockImplementationOnce(() => answerDraftStream)
-      .mockImplementationOnce(() => reasoningDraftStream);
-    dispatchReplyWithBufferedBlockDispatcher.mockImplementation(
-      async ({ dispatcherOptions, replyOptions }) => {
-        await replyOptions?.onPartialReply?.({ text: "Same final text" });
-        await replyOptions?.onAssistantMessageStart?.();
-        await dispatcherOptions.deliver({ text: "Same final text" }, { kind: "final" });
-        return { queuedFinal: true };
-      },
-    );
-    deliverReplies.mockResolvedValue({ delivered: true });
-    editMessageTelegram.mockRejectedValue(new Error("400: Bad Request: message to edit not found"));
-    const bot = createBot();
-
-    await dispatchWithContext({ context: createContext(), streamMode: "partial", bot });
-
-    expect(editMessageTelegram).not.toHaveBeenCalled();
-    expect(deliverReplies).not.toHaveBeenCalled();
-    expect(
-      (bot.api as unknown as { deleteMessage: { mock: { calls: unknown[][] } } }).deleteMessage.mock
-        .calls,
-    ).toHaveLength(0);
-  });
-
   it.each(["block", "partial"] as const)(
     "splits reasoning lane only when a later reasoning block starts (%s mode)",
     async (streamMode) => {
