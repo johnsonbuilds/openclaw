@@ -163,6 +163,7 @@ else
   },
   "agents": {
     "defaults": {
+      "workspace": "$OPENCLAW_WORKSPACE_DIR",
       "model": {
         "primary": "$LLM_PROVIDER/$LLM_MODEL_ID"
       }

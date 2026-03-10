@@ -13,6 +13,12 @@ export function resolveDefaultAgentWorkspaceDir(
   env: NodeJS.ProcessEnv = process.env,
   homedir: () => string = os.homedir,
 ): string {
+  const workspaceOverride =
+    env.OPENCLAW_WORKSPACE_DIR?.trim() || env.CLAWDBOT_WORKSPACE_DIR?.trim();
+  if (workspaceOverride) {
+    return resolveUserPath(workspaceOverride);
+  }
+
   const home = resolveRequiredHomeDir(env, homedir);
   const profile = env.OPENCLAW_PROFILE?.trim();
   if (profile && profile.toLowerCase() !== "default") {
