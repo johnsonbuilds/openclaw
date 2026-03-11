@@ -2,10 +2,13 @@
 set -e
 
 # 1. 定义路径与运行参数
+# OPENCLAW_STATE_DIR 是持久化根目录。
+# 如果没有显式覆盖，config 和 workspace 都默认落在这个目录下，避免路径语义分叉。
 OPENCLAW_STATE_DIR=${OPENCLAW_STATE_DIR? "Error: OPENCLAW_STATE_DIR environment variable is required but not set"}
-OPENCLAW_WORKSPACE_DIR=${OPENCLAW_WORKSPACE_DIR:-/data/workspace}
-CONFIG_DIR="$OPENCLAW_STATE_DIR"
-CONFIG_FILE="$CONFIG_DIR/openclaw.json"
+OPENCLAW_CONFIG_PATH=${OPENCLAW_CONFIG_PATH:-$OPENCLAW_STATE_DIR/openclaw.json}
+OPENCLAW_WORKSPACE_DIR=${OPENCLAW_WORKSPACE_DIR:-$OPENCLAW_STATE_DIR/workspace}
+CONFIG_FILE="$OPENCLAW_CONFIG_PATH"
+CONFIG_DIR=$(dirname "$CONFIG_FILE")
 INTERNAL_GATEWAY_PORT=${INTERNAL_GATEWAY_PORT:-18789}
 
 # Always bind the gateway to loopback so it is never directly exposed on the network.
@@ -51,6 +54,9 @@ fi
 
 export NODE_OPTIONS="--max-old-space-size=${OPENCLAW_MAX_OLD_SPACE_MB} ${NODE_OPTIONS}"
 echo "[entrypoint] max-old-space-size=${OPENCLAW_MAX_OLD_SPACE_MB} MB"
+echo "[entrypoint] state dir=$OPENCLAW_STATE_DIR"
+echo "[entrypoint] config path=$CONFIG_FILE"
+echo "[entrypoint] workspace dir=$OPENCLAW_WORKSPACE_DIR"
 
 mkdir -p "$CONFIG_DIR" "$OPENCLAW_WORKSPACE_DIR"
 
