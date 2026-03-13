@@ -1,6 +1,4 @@
-# Tooling Notes
-
-## Fork upstream sync workflow
+# Fork upstream sync workflow
 
 Use this workflow when syncing this fork with `openclaw/openclaw` upstream.
 
