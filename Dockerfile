@@ -13,14 +13,21 @@
 #   Default (bookworm):      docker build .
 #   Slim (bookworm-slim):    docker build --build-arg OPENCLAW_VARIANT=slim .
 ARG OPENCLAW_EXTENSIONS=""
-ARG OPENCLAW_NODE_BOOKWORM_IMAGE="node:22-bookworm@sha256:b501c082306a4f528bc4038cbf2fbb58095d583d0419a259b2114b5ac53d12e9"
-ARG OPENCLAW_NODE_BOOKWORM_DIGEST="sha256:b501c082306a4f528bc4038cbf2fbb58095d583d0419a259b2114b5ac53d12e9"
+ARG OPENCLAW_VARIANT=default
+ARG OPENCLAW_NODE_BOOKWORM_IMAGE="node:24-bookworm@sha256:3a09aa6354567619221ef6c45a5051b671f953f0a1924d1f819ffb236e520e6b"
+ARG OPENCLAW_NODE_BOOKWORM_DIGEST="sha256:3a09aa6354567619221ef6c45a5051b671f953f0a1924d1f819ffb236e520e6b"
+ARG OPENCLAW_NODE_BOOKWORM_SLIM_IMAGE="node:24-bookworm-slim@sha256:e8e2e91b1378f83c5b2dd15f0247f34110e2fe895f6ca7719dbb780f929368eb"
+ARG OPENCLAW_NODE_BOOKWORM_SLIM_DIGEST="sha256:e8e2e91b1378f83c5b2dd15f0247f34110e2fe895f6ca7719dbb780f929368eb"
 
-# Copy package manifests for opted-in extensions without invalidating the main
-# dependency layer on unrelated extension source changes.
+# Base images are pinned to SHA256 digests for reproducible builds.
+# Trade-off: digests must be updated manually when upstream tags move.
+# To update, run: docker buildx imagetools inspect node:24-bookworm (or podman)
+# and replace the digest below with the current multi-arch manifest list entry.
+
 FROM ${OPENCLAW_NODE_BOOKWORM_IMAGE} AS ext-deps
 ARG OPENCLAW_EXTENSIONS
 COPY extensions /tmp/extensions
+# Copy package.json for opted-in extensions so pnpm resolves their deps.
 RUN mkdir -p /out && \
     for ext in $OPENCLAW_EXTENSIONS; do \
       if [ -f "/tmp/extensions/$ext/package.json" ]; then \
@@ -30,9 +37,22 @@ RUN mkdir -p /out && \
     done
 
 # Build OpenClaw with the fork's existing wrapper-based deployment flow.
-FROM ${OPENCLAW_NODE_BOOKWORM_IMAGE} AS builder
-RUN curl -fsSL https://bun.sh/install | bash
+FROM ${OPENCLAW_NODE_BOOKWORM_IMAGE} AS build
+
+# Install Bun (required for build scripts). Retry the whole bootstrap flow to
+# tolerate transient 5xx failures from bun.sh/GitHub during CI image builds.
+RUN set -eux; \
+    for attempt in 1 2 3 4 5; do \
+      if curl --retry 5 --retry-all-errors --retry-delay 2 -fsSL https://bun.sh/install | bash; then \
+        break; \
+      fi; \
+      if [ "$attempt" -eq 5 ]; then \
+        exit 1; \
+      fi; \
+      sleep $((attempt * 2)); \
+    done
 ENV PATH="/root/.bun/bin:${PATH}"
+
 RUN corepack enable
 
 WORKDIR /app
@@ -75,17 +95,30 @@ RUN pnpm ui:build
 
 # Prune dev dependencies and strip build-only metadata before copying
 # runtime assets into the final image.
-FROM builder AS runtime-assets
+FROM build AS runtime-assets
 RUN CI=true pnpm prune --prod && \
     find dist -type f \( -name '*.d.ts' -o -name '*.d.mts' -o -name '*.d.cts' -o -name '*.map' \) -delete
 
-# Runtime image keeps the fork's wrapper and entrypoint behavior intact.
-FROM ${OPENCLAW_NODE_BOOKWORM_IMAGE}
+# ── Runtime base images ─────────────────────────────────────────
+FROM ${OPENCLAW_NODE_BOOKWORM_IMAGE} AS base-default
 ARG OPENCLAW_NODE_BOOKWORM_DIGEST
+LABEL org.opencontainers.image.base.name="docker.io/library/node:24-bookworm" \
+  org.opencontainers.image.base.digest="${OPENCLAW_NODE_BOOKWORM_DIGEST}"
 
-LABEL org.opencontainers.image.base.name="docker.io/library/node:22-bookworm" \
-  org.opencontainers.image.base.digest="${OPENCLAW_NODE_BOOKWORM_DIGEST}" \
-  org.opencontainers.image.source="https://github.com/openclaw/openclaw" \
+FROM ${OPENCLAW_NODE_BOOKWORM_SLIM_IMAGE} AS base-slim
+ARG OPENCLAW_NODE_BOOKWORM_SLIM_DIGEST
+LABEL org.opencontainers.image.base.name="docker.io/library/node:24-bookworm-slim" \
+  org.opencontainers.image.base.digest="${OPENCLAW_NODE_BOOKWORM_SLIM_DIGEST}"
+
+# Runtime image keeps the fork's wrapper and entrypoint behavior intact.
+FROM base-${OPENCLAW_VARIANT}
+ARG OPENCLAW_VARIANT
+
+# OCI base-image metadata for downstream image consumers.
+# If you change these annotations, also update:
+# - docs/install/docker.md ("Base image metadata" section)
+# - https://docs.openclaw.ai/install/docker
+LABEL org.opencontainers.image.source="https://github.com/openclaw/openclaw" \
   org.opencontainers.image.url="https://openclaw.ai" \
   org.opencontainers.image.documentation="https://docs.openclaw.ai/install/docker" \
   org.opencontainers.image.licenses="MIT" \
@@ -93,16 +126,20 @@ LABEL org.opencontainers.image.base.name="docker.io/library/node:22-bookworm" \
   org.opencontainers.image.description="OpenClaw wrapper runtime container image"
 
 ENV NODE_ENV=production
-WORKDIR /app
 
+# Install system utilities present in bookworm but missing in bookworm-slim.
+# On the full bookworm image these are already installed (apt-get is a no-op).
 RUN --mount=type=cache,id=openclaw-bookworm-apt-cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,id=openclaw-bookworm-apt-lists,target=/var/lib/apt,sharing=locked \
     apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get upgrade -y --no-install-recommends && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
       procps hostname curl git openssl \
       chromium \
       fonts-ipafont-gothic fonts-wqy-zenhei fonts-thai-tlwg fonts-kacst fonts-freefont-ttf libxss1
 
+# Install additional system packages needed by your skills or extensions.
+# Example: docker build --build-arg OPENCLAW_DOCKER_APT_PACKAGES="python3 wget" .
 ARG OPENCLAW_DOCKER_APT_PACKAGES=""
 RUN --mount=type=cache,id=openclaw-bookworm-apt-cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,id=openclaw-bookworm-apt-lists,target=/var/lib/apt,sharing=locked \
@@ -113,17 +150,33 @@ RUN --mount=type=cache,id=openclaw-bookworm-apt-cache,target=/var/cache/apt,shar
 
 ENV CHROME_PATH=/usr/bin/chromium
 
-COPY wrapper/package.json ./
-RUN npm install --omit=dev && npm cache clean --force
+WORKDIR /openclaw
+RUN chown node:node /openclaw
 
-RUN mkdir -p /openclaw
-COPY --from=runtime-assets /app/dist /openclaw/dist
-COPY --from=runtime-assets /app/node_modules /openclaw/node_modules
-COPY --from=runtime-assets /app/package.json /openclaw/package.json
-COPY --from=runtime-assets /app/openclaw.mjs /openclaw/openclaw.mjs
-COPY --from=runtime-assets /app/extensions /openclaw/extensions
-COPY --from=runtime-assets /app/skills /openclaw/skills
-COPY --from=runtime-assets /app/docs /openclaw/docs
+COPY --from=runtime-assets --chown=node:node /app/dist ./dist
+COPY --from=runtime-assets --chown=node:node /app/node_modules ./node_modules
+COPY --from=runtime-assets --chown=node:node /app/package.json .
+COPY --from=runtime-assets --chown=node:node /app/openclaw.mjs .
+COPY --from=runtime-assets --chown=node:node /app/extensions ./extensions
+COPY --from=runtime-assets --chown=node:node /app/skills ./skills
+COPY --from=runtime-assets --chown=node:node /app/docs ./docs
+
+# Keep pnpm available in the runtime image for container-local workflows.
+# Use a shared Corepack home so the non-root `node` user does not need a
+# first-run network fetch when invoking pnpm.
+ENV COREPACK_HOME=/usr/local/share/corepack
+RUN install -d -m 0755 "$COREPACK_HOME" && \
+    corepack enable && \
+    for attempt in 1 2 3 4 5; do \
+      if corepack prepare "$(node -p "require('./package.json').packageManager")" --activate; then \
+        break; \
+      fi; \
+      if [ "$attempt" -eq 5 ]; then \
+        exit 1; \
+      fi; \
+      sleep $((attempt * 2)); \
+    done && \
+    chmod -R a+rX "$COREPACK_HOME"
 
 # Normalize extension paths so plugin safety checks do not reject permissive modes.
 RUN for dir in /openclaw/extensions /openclaw/.agent /openclaw/.agents; do \
@@ -132,6 +185,11 @@ RUN for dir in /openclaw/extensions /openclaw/.agent /openclaw/.agents; do \
         find "$dir" -type f -exec chmod 644 {} +; \
       fi; \
     done
+
+WORKDIR /app
+
+COPY wrapper/package.json ./
+RUN npm install --omit=dev && npm cache clean --force
 
 COPY wrapper/server.js ./src/server.js
 COPY wrapper/src/setup-app.js ./src/setup-app.js
@@ -150,7 +208,8 @@ RUN --mount=type=cache,id=openclaw-bookworm-apt-cache,target=/var/cache/apt,shar
       DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends xvfb && \
       mkdir -p /home/node/.cache/ms-playwright && \
       PLAYWRIGHT_BROWSERS_PATH=/home/node/.cache/ms-playwright \
-      node /openclaw/node_modules/playwright-core/cli.js install --with-deps chromium; \
+      node /openclaw/node_modules/playwright-core/cli.js install --with-deps chromium && \
+      chown -R node:node /home/node/.cache/ms-playwright; \
     fi
 
 # Optionally install Docker CLI for sandbox container management.
