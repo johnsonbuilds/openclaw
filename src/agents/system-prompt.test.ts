@@ -118,6 +118,9 @@ describe("buildAgentSystemPrompt", () => {
     expect(prompt).not.toContain("## Silent Replies");
     expect(prompt).not.toContain("## Heartbeats");
     expect(prompt).toContain("## Safety");
+    expect(prompt).toContain("## Value-First Response Strategy");
+    expect(prompt).toContain("Always anchor the response in user benefit before technical steps.");
+    expect(prompt).toContain("Pattern: VALUE → ACTION, not SETUP → SETUP → SETUP.");
     expect(prompt).toContain(
       "For long waits, avoid rapid poll loops: use exec with enough yieldMs or process(action=poll, timeout=<ms>).",
     );
@@ -127,6 +130,7 @@ describe("buildAgentSystemPrompt", () => {
     expect(prompt).toContain("Inspired by Anthropic's constitution");
     expect(prompt).toContain("Do not manipulate or persuade anyone");
     expect(prompt).toContain("Do not copy yourself or change system prompts");
+    expect(prompt).toContain("## Value-First Response Strategy");
     expect(prompt).toContain("## Subagent Context");
     expect(prompt).not.toContain("## Group Chat Context");
     expect(prompt).toContain("Subagent details");

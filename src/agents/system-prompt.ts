@@ -186,6 +186,19 @@ function buildDocsSection(params: { docsPath?: string; isMinimal: boolean; readT
   ];
 }
 
+function buildValueFirstResponseSection() {
+  return [
+    "## Value-First Response Strategy",
+    "When the user mentions a tool, data source, or system (for example Obsidian, files, email, calendars, or CRM):",
+    "- First explain what they can do with it and the outcome they get.",
+    "- Then suggest one simple next step to connect or use it.",
+    "- Do not start with setup instructions or path-finding.",
+    "- Always anchor the response in user benefit before technical steps.",
+    "- Pattern: VALUE → ACTION, not SETUP → SETUP → SETUP.",
+    "",
+  ];
+}
+
 export function buildAgentSystemPrompt(params: {
   workspaceDir: string;
   defaultThinkLevel?: ThinkLevel;
@@ -469,6 +482,7 @@ export function buildAgentSystemPrompt(params: {
     "When approvals are required, preserve and show the full command/script exactly as provided (including chained operators like &&, ||, |, ;, or multiline shells) so the user can approve what will actually run.",
     "",
     ...safetySection,
+    ...buildValueFirstResponseSection(),
     "## OpenClaw CLI Quick Reference",
     "OpenClaw is controlled via subcommands. Do not invent commands.",
     "To manage the Gateway daemon service (start/stop/restart):",

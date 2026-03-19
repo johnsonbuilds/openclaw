@@ -18,6 +18,7 @@ The prompt is intentionally compact and uses fixed sections:
 
 - **Tooling**: current tool list + short descriptions.
 - **Safety**: short guardrail reminder to avoid power-seeking behavior or bypassing oversight.
+- **Value-First Response Strategy**: when users mention tools, data sources, or systems, explain the value first and then suggest the next simple action.
 - **Skills** (when available): tells the model how to load skill instructions on demand.
 - **OpenClaw Self-Update**: how to run `config.apply` and `update.run`.
 - **Workspace**: working directory (`agents.defaults.workspace`).
@@ -41,8 +42,8 @@ OpenClaw can render smaller system prompts for sub-agents. The runtime sets a
 - `minimal`: used for sub-agents; omits **Skills**, **Memory Recall**, **OpenClaw
   Self-Update**, **Model Aliases**, **User Identity**, **Reply Tags**,
   **Messaging**, **Silent Replies**, and **Heartbeats**. Tooling, **Safety**,
-  Workspace, Sandbox, Current Date & Time (when known), Runtime, and injected
-  context stay available.
+  **Value-First Response Strategy**, Workspace, Sandbox, Current Date & Time
+  (when known), Runtime, and injected context stay available.
 - `none`: returns only the base identity line.
 
 When `promptMode=minimal`, extra injected prompts are labeled **Subagent
