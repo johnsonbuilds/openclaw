@@ -899,17 +899,6 @@ export async function startGatewayServer(
     } catch (error) {
       log.warn(`MCP loopback server failed to start: ${String(error)}`);
     }
-  let agentUnsub: (() => void) | null = null;
-  let heartbeatUnsub: (() => void) | null = null;
-  let transcriptUnsub: (() => void) | null = null;
-  let lifecycleUnsub: (() => void) | null = null;
-  try {
-    try {
-      mcpServer = await startMcpLoopbackServer(0);
-      log.info(`MCP loopback server listening on http://127.0.0.1:${mcpServer.port}/mcp`);
-    } catch (error) {
-      log.warn(`MCP loopback server failed to start: ${String(error)}`);
-    }
 
     if (!minimalTestGateway) {
       const machineDisplayName = await getMachineDisplayName();
