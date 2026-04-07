@@ -5,8 +5,10 @@
  * resolves agent routes, and handles replies.
  */
 
-import type { ReplyPayload, OpenClawConfig } from "openclaw/plugin-sdk/twitch";
-import { createReplyPrefixOptions } from "openclaw/plugin-sdk/twitch";
+import type { MarkdownTableMode, OpenClawConfig } from "openclaw/plugin-sdk/config-runtime";
+import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
+import type { ReplyPayload } from "../api.js";
+import { createChannelReplyPipeline } from "../api.js";
 import { checkTwitchAccessControl } from "./access-control.js";
 import { getOrCreateClientManager } from "./client-manager-registry.js";
 import { getTwitchRuntime } from "./runtime.js";
@@ -105,7 +107,7 @@ async function processTwitchMessage(params: {
     channel: "twitch",
     accountId,
   });
-  const { onModelSelected, ...prefixOptions } = createReplyPrefixOptions({
+  const { onModelSelected, ...replyPipeline } = createChannelReplyPipeline({
     cfg,
     agentId: route.agentId,
     channel: "twitch",
@@ -116,7 +118,7 @@ async function processTwitchMessage(params: {
     ctx: ctxPayload,
     cfg,
     dispatcherOptions: {
-      ...prefixOptions,
+      ...replyPipeline,
       deliver: async (payload) => {
         await deliverTwitchReply({
           payload,
@@ -145,7 +147,7 @@ async function deliverTwitchReply(params: {
   account: TwitchAccountConfig;
   accountId: string;
   config: unknown;
-  tableMode: "off" | "plain" | "markdown" | "bullets" | "code";
+  tableMode: MarkdownTableMode;
   runtime: TwitchRuntimeEnv;
   statusSink?: (patch: { lastInboundAt?: number; lastOutboundAt?: number }) => void;
 }): Promise<void> {
@@ -220,7 +222,7 @@ export async function monitorTwitchProvider(
       accountId,
     );
   } catch (error) {
-    const errorMsg = error instanceof Error ? error.message : String(error);
+    const errorMsg = formatErrorMessage(error);
     runtime.error?.(`Failed to connect: ${errorMsg}`);
     throw error;
   }

@@ -4,7 +4,7 @@ import {
   resolveWebhookTargetWithAuthOrReject,
   withResolvedWebhookRequestPipeline,
   type WebhookInFlightLimiter,
-} from "openclaw/plugin-sdk/googlechat";
+} from "../runtime-api.js";
 import { verifyGoogleChatRequest } from "./auth.js";
 import type { WebhookTarget } from "./monitor-types.js";
 import type {
@@ -15,11 +15,20 @@ import type {
 } from "./types.js";
 
 function extractBearerToken(header: unknown): string {
-  const authHeader = Array.isArray(header) ? String(header[0] ?? "") : String(header ?? "");
+  const authHeader = Array.isArray(header)
+    ? typeof header[0] === "string"
+      ? header[0]
+      : ""
+    : typeof header === "string"
+      ? header
+      : "";
   return authHeader.toLowerCase().startsWith("bearer ")
     ? authHeader.slice("bearer ".length).trim()
     : "";
 }
+
+const ADD_ON_PREAUTH_MAX_BYTES = 16 * 1024;
+const ADD_ON_PREAUTH_TIMEOUT_MS = 3_000;
 
 type ParsedGoogleChatInboundPayload =
   | { ok: true; event: GoogleChatEvent; addOnBearerToken: string }
@@ -60,7 +69,10 @@ function parseGoogleChatInboundPayload(
       user: chat.user,
       eventTime: chat.eventTime,
     };
-    addOnBearerToken = String(rawObj.authorizationEventObject?.systemIdToken ?? "").trim();
+    addOnBearerToken =
+      typeof rawObj.authorizationEventObject?.systemIdToken === "string"
+        ? rawObj.authorizationEventObject.systemIdToken.trim()
+        : "";
   }
 
   const event = eventPayload as GoogleChatEvent;
@@ -112,6 +124,12 @@ export function createGoogleChatWebhookRequestHandler(params: {
             req,
             res,
             profile,
+            ...(profile === "pre-auth"
+              ? {
+                  maxBytes: ADD_ON_PREAUTH_MAX_BYTES,
+                  timeoutMs: ADD_ON_PREAUTH_TIMEOUT_MS,
+                }
+              : {}),
             emptyObjectOnEmpty: false,
             invalidJsonMessage: "invalid payload",
           });
@@ -132,6 +150,7 @@ export function createGoogleChatWebhookRequestHandler(params: {
                 bearer: headerBearer,
                 audienceType: target.audienceType,
                 audience: target.audience,
+                expectedAddOnPrincipal: target.account.config.appPrincipal,
               });
               return verification.ok;
             },
@@ -166,6 +185,7 @@ export function createGoogleChatWebhookRequestHandler(params: {
                 bearer: parsed.addOnBearerToken,
                 audienceType: target.audienceType,
                 audience: target.audience,
+                expectedAddOnPrincipal: target.account.config.appPrincipal,
               });
               return verification.ok;
             },

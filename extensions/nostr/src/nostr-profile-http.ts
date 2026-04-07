@@ -8,13 +8,14 @@
  */
 
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { readStringValue } from "openclaw/plugin-sdk/text-runtime";
+import { z } from "openclaw/plugin-sdk/zod";
 import {
   createFixedWindowRateLimiter,
   isBlockedHostnameOrIp,
   readJsonBodyWithLimit,
   requestBodyErrorToText,
-} from "openclaw/plugin-sdk/nostr";
-import { z } from "zod";
+} from "../api.js";
 import { publishNostrProfile, getNostrProfileState } from "./channel.js";
 import { NostrProfileSchema, type NostrProfile } from "./config-schema.js";
 import { importProfileFromRelays, mergeProfiles } from "./nostr-profile-import.js";
@@ -228,7 +229,7 @@ function firstHeaderValue(value: string | string[] | undefined): string | undefi
   if (Array.isArray(value)) {
     return value[0];
   }
-  return typeof value === "string" ? value : undefined;
+  return readStringValue(value);
 }
 
 function normalizeIpCandidate(raw: string): string {

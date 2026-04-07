@@ -2,12 +2,13 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import * as tar from "tar";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RuntimeEnv } from "../runtime.js";
 import { createTempHomeEnv, type TempHomeEnv } from "../test-utils/temp-home.js";
 import {
   buildBackupArchiveRoot,
   encodeAbsolutePathForBackupArchive,
+  resolveBackupPlanFromPaths,
   resolveBackupPlanFromDisk,
 } from "./backup-shared.js";
 import { backupCreateCommand } from "./backup.js";
@@ -20,11 +21,19 @@ vi.mock("./backup-verify.js", () => ({
 
 describe("backup commands", () => {
   let tempHome: TempHomeEnv;
-  let previousCwd: string;
+
+  async function resetTempHome() {
+    await fs.rm(tempHome.home, { recursive: true, force: true });
+    await fs.mkdir(path.join(tempHome.home, ".openclaw"), { recursive: true });
+    delete process.env.OPENCLAW_CONFIG_PATH;
+  }
+
+  beforeAll(async () => {
+    tempHome = await createTempHomeEnv("openclaw-backup-test-");
+  });
 
   beforeEach(async () => {
-    tempHome = await createTempHomeEnv("openclaw-backup-test-");
-    previousCwd = process.cwd();
+    await resetTempHome();
     backupVerifyCommandMock.mockReset();
     backupVerifyCommandMock.mockResolvedValue({
       ok: true,
@@ -38,7 +47,10 @@ describe("backup commands", () => {
   });
 
   afterEach(async () => {
-    process.chdir(previousCwd);
+    vi.restoreAllMocks();
+  });
+
+  afterAll(async () => {
     await tempHome.restore();
   });
 
@@ -77,13 +89,25 @@ describe("backup commands", () => {
 
   it("collapses default config, credentials, and workspace into the state backup root", async () => {
     const stateDir = path.join(tempHome.home, ".openclaw");
-    await fs.writeFile(path.join(stateDir, "openclaw.json"), JSON.stringify({}), "utf8");
-    await fs.mkdir(path.join(stateDir, "credentials"), { recursive: true });
-    await fs.writeFile(path.join(stateDir, "credentials", "oauth.json"), "{}", "utf8");
-    await fs.mkdir(path.join(stateDir, "workspace"), { recursive: true });
-    await fs.writeFile(path.join(stateDir, "workspace", "SOUL.md"), "# soul\n", "utf8");
+    const configPath = path.join(stateDir, "openclaw.json");
+    const oauthDir = path.join(stateDir, "credentials");
+    const workspaceDir = path.join(stateDir, "workspace");
+    await fs.writeFile(configPath, JSON.stringify({}), "utf8");
+    await fs.mkdir(oauthDir, { recursive: true });
+    await fs.writeFile(path.join(oauthDir, "oauth.json"), "{}", "utf8");
+    await fs.mkdir(workspaceDir, { recursive: true });
+    await fs.writeFile(path.join(workspaceDir, "SOUL.md"), "# soul\n", "utf8");
 
-    const plan = await resolveBackupPlanFromDisk({ includeWorkspace: true, nowMs: 123 });
+    const plan = await resolveBackupPlanFromPaths({
+      stateDir,
+      configPath,
+      oauthDir,
+      workspaceDirs: [workspaceDir],
+      includeWorkspace: true,
+      configInsideState: true,
+      oauthInsideState: true,
+      nowMs: 123,
+    });
     expectWorkspaceCoveredByState(plan);
   });
 
@@ -100,19 +124,16 @@ describe("backup commands", () => {
       await fs.mkdir(workspaceDir, { recursive: true });
       await fs.writeFile(path.join(workspaceDir, "SOUL.md"), "# soul\n", "utf8");
       await fs.symlink(workspaceDir, workspaceLink);
-      await fs.writeFile(
-        path.join(stateDir, "openclaw.json"),
-        JSON.stringify({
-          agents: {
-            defaults: {
-              workspace: workspaceLink,
-            },
-          },
-        }),
-        "utf8",
-      );
-
-      const plan = await resolveBackupPlanFromDisk({ includeWorkspace: true, nowMs: 123 });
+      const plan = await resolveBackupPlanFromPaths({
+        stateDir,
+        configPath: path.join(stateDir, "openclaw.json"),
+        oauthDir: path.join(stateDir, "credentials"),
+        workspaceDirs: [workspaceLink],
+        includeWorkspace: true,
+        configInsideState: true,
+        oauthInsideState: true,
+        nowMs: 123,
+      });
       expectWorkspaceCoveredByState(plan);
     } finally {
       await fs.rm(symlinkDir, { recursive: true, force: true });
@@ -269,7 +290,7 @@ describe("backup commands", () => {
     await fs.writeFile(path.join(stateDir, "openclaw.json"), JSON.stringify({}), "utf8");
     await fs.mkdir(workspaceDir, { recursive: true });
     await fs.writeFile(path.join(workspaceDir, "SOUL.md"), "# soul\n", "utf8");
-    process.chdir(workspaceDir);
+    vi.spyOn(process, "cwd").mockReturnValue(workspaceDir);
 
     const runtime = createRuntime();
 
@@ -296,7 +317,7 @@ describe("backup commands", () => {
       await fs.mkdir(workspaceDir, { recursive: true });
       await fs.writeFile(path.join(workspaceDir, "SOUL.md"), "# soul\n", "utf8");
       await fs.symlink(workspaceDir, workspaceLink);
-      process.chdir(workspaceLink);
+      vi.spyOn(process, "cwd").mockReturnValue(workspaceLink);
 
       const runtime = createRuntime();
 

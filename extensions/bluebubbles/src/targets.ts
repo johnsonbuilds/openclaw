@@ -1,11 +1,12 @@
+import { isAllowedParsedChatSender } from "openclaw/plugin-sdk/allow-from";
 import {
-  isAllowedParsedChatSender,
   parseChatAllowTargetPrefixes,
   parseChatTargetPrefixesOrThrow,
   type ParsedChatTarget,
   resolveServicePrefixedAllowTarget,
   resolveServicePrefixedTarget,
-} from "openclaw/plugin-sdk/bluebubbles";
+} from "openclaw/plugin-sdk/channel-targets";
+import { normalizeOptionalString } from "openclaw/plugin-sdk/text-runtime";
 
 export type BlueBubblesService = "imessage" | "sms" | "auto";
 
@@ -29,7 +30,7 @@ const CHAT_IDENTIFIER_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4
 const CHAT_IDENTIFIER_HEX_RE = /^[0-9a-f]{24,64}$/i;
 
 function parseRawChatGuid(value: string): string | null {
-  const trimmed = value.trim();
+  const trimmed = normalizeOptionalString(value);
   if (!trimmed) {
     return null;
   }
@@ -37,9 +38,9 @@ function parseRawChatGuid(value: string): string | null {
   if (parts.length !== 3) {
     return null;
   }
-  const service = parts[0]?.trim();
-  const separator = parts[1]?.trim();
-  const identifier = parts[2]?.trim();
+  const service = normalizeOptionalString(parts[0]);
+  const separator = normalizeOptionalString(parts[1]);
+  const identifier = normalizeOptionalString(parts[2]);
   if (!service || !identifier) {
     return null;
   }
@@ -54,7 +55,7 @@ function stripPrefix(value: string, prefix: string): string {
 }
 
 function stripBlueBubblesPrefix(value: string): string {
-  const trimmed = value.trim();
+  const trimmed = normalizeOptionalString(value) ?? "";
   if (!trimmed) {
     return "";
   }
@@ -65,7 +66,7 @@ function stripBlueBubblesPrefix(value: string): string {
 }
 
 function looksLikeRawChatIdentifier(value: string): boolean {
-  const trimmed = value.trim();
+  const trimmed = normalizeOptionalString(value);
   if (!trimmed) {
     return false;
   }
@@ -139,7 +140,7 @@ export function extractHandleFromChatGuid(chatGuid: string): string | null {
   const parts = chatGuid.split(";");
   // DM format: service;-;handle (3 parts, middle is "-")
   if (parts.length === 3 && parts[1] === "-") {
-    const handle = parts[2]?.trim();
+    const handle = normalizeOptionalString(parts[2]);
     if (handle) {
       return normalizeBlueBubblesHandle(handle);
     }
@@ -222,6 +223,45 @@ export function looksLikeBlueBubblesTargetId(raw: string, normalized?: string): 
     return true;
   }
   if (normalized) {
+    const normalizedTrimmed = normalizeOptionalString(normalized);
+    if (!normalizedTrimmed) {
+      return false;
+    }
+    const normalizedLower = normalizedTrimmed.toLowerCase();
+    if (
+      /^(imessage|sms|auto):/.test(normalizedLower) ||
+      /^(chat_id|chat_guid|chat_identifier):/.test(normalizedLower)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+export function looksLikeBlueBubblesExplicitTargetId(raw: string, normalized?: string): boolean {
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return false;
+  }
+  const candidate = stripBlueBubblesPrefix(trimmed);
+  if (!candidate) {
+    return false;
+  }
+  const lowered = candidate.toLowerCase();
+  if (/^(imessage|sms|auto):/.test(lowered)) {
+    return true;
+  }
+  if (
+    /^(chat_id|chatid|chat|chat_guid|chatguid|guid|chat_identifier|chatidentifier|chatident|group):/.test(
+      lowered,
+    )
+  ) {
+    return true;
+  }
+  if (parseRawChatGuid(candidate) || looksLikeRawChatIdentifier(candidate)) {
+    return true;
+  }
+  if (normalized) {
     const normalizedTrimmed = normalized.trim();
     if (!normalizedTrimmed) {
       return false;
@@ -235,6 +275,24 @@ export function looksLikeBlueBubblesTargetId(raw: string, normalized?: string): 
     }
   }
   return false;
+}
+
+export function inferBlueBubblesTargetChatType(raw: string): "direct" | "group" | undefined {
+  try {
+    const parsed = parseBlueBubblesTarget(raw);
+    if (parsed.kind === "handle") {
+      return "direct";
+    }
+    if (parsed.kind === "chat_guid") {
+      return parsed.chatGuid.includes(";+;") ? "group" : "direct";
+    }
+    if (parsed.kind === "chat_id" || parsed.kind === "chat_identifier") {
+      return "group";
+    }
+  } catch {
+    return undefined;
+  }
+  return undefined;
 }
 
 export function parseBlueBubblesTarget(raw: string): BlueBubblesTarget {
@@ -289,7 +347,7 @@ export function parseBlueBubblesTarget(raw: string): BlueBubblesTarget {
 }
 
 export function parseBlueBubblesAllowTarget(raw: string): BlueBubblesAllowTarget {
-  const trimmed = raw.trim();
+  const trimmed = normalizeOptionalString(raw) ?? "";
   if (!trimmed) {
     return { kind: "handle", handle: "" };
   }
@@ -355,11 +413,11 @@ export function formatBlueBubblesChatTarget(params: {
   if (params.chatId && Number.isFinite(params.chatId)) {
     return `chat_id:${params.chatId}`;
   }
-  const guid = params.chatGuid?.trim();
+  const guid = normalizeOptionalString(params.chatGuid);
   if (guid) {
     return `chat_guid:${guid}`;
   }
-  const identifier = params.chatIdentifier?.trim();
+  const identifier = normalizeOptionalString(params.chatIdentifier);
   if (identifier) {
     return `chat_identifier:${identifier}`;
   }
