@@ -206,7 +206,6 @@ COPY wrapper/package.json ./
 RUN npm install --omit=dev && npm cache clean --force
 
 COPY wrapper/server.js ./src/server.js
-COPY wrapper/src/setup-app.js ./src/setup-app.js
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
