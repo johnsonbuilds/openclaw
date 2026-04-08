@@ -3,10 +3,8 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-
 import express from "express";
 import httpProxy from "http-proxy";
-import * as tar from "tar";
 
 // Railway deployments sometimes inject PORT=3000 by default. We want the wrapper to
 // reliably listen on 8080 unless explicitly overridden.
@@ -40,9 +38,10 @@ const SETUP_PASSWORD = process.env.SETUP_PASSWORD?.trim();
 // Must be stable across restarts. If not provided via env, persist it in the state dir.
 function resolveGatewayToken() {
   const envTok =
-    process.env.OPENCLAW_GATEWAY_TOKEN?.trim() ||
-    process.env.CLAWDBOT_GATEWAY_TOKEN?.trim();
-  if (envTok) return envTok;
+    process.env.OPENCLAW_GATEWAY_TOKEN?.trim() || process.env.CLAWDBOT_GATEWAY_TOKEN?.trim();
+  if (envTok) {
+    return envTok;
+  }
 
   try {
     const cfgPath = configPath();
@@ -65,7 +64,9 @@ function resolveGatewayToken() {
   const tokenPath = path.join(STATE_DIR, "gateway.token");
   try {
     const existing = fs.readFileSync(tokenPath, "utf8").trim();
-    if (existing) return existing;
+    if (existing) {
+      return existing;
+    }
   } catch {
     // ignore
   }
@@ -83,15 +84,11 @@ function resolveGatewayToken() {
 const OPENCLAW_GATEWAY_TOKEN = resolveGatewayToken();
 process.env.OPENCLAW_GATEWAY_TOKEN = OPENCLAW_GATEWAY_TOKEN;
 // Backward-compat: some older flows expect CLAWDBOT_GATEWAY_TOKEN.
-process.env.CLAWDBOT_GATEWAY_TOKEN =
-  process.env.CLAWDBOT_GATEWAY_TOKEN || OPENCLAW_GATEWAY_TOKEN;
+process.env.CLAWDBOT_GATEWAY_TOKEN = process.env.CLAWDBOT_GATEWAY_TOKEN || OPENCLAW_GATEWAY_TOKEN;
 
 // Where the gateway will listen internally (we proxy to it).
 // The wrapper always proxies requests to the gateway.
-const INTERNAL_GATEWAY_PORT = Number.parseInt(
-  process.env.INTERNAL_GATEWAY_PORT ?? "18789",
-  10,
-);
+const INTERNAL_GATEWAY_PORT = Number.parseInt(process.env.INTERNAL_GATEWAY_PORT ?? "18789", 10);
 const INTERNAL_GATEWAY_HOST = process.env.INTERNAL_GATEWAY_HOST ?? "127.0.0.1";
 const GATEWAY_TARGET = `http://${INTERNAL_GATEWAY_HOST}:${INTERNAL_GATEWAY_PORT}`;
 // Always bind the gateway to loopback so it's never directly exposed on the network.
@@ -99,8 +96,7 @@ const GATEWAY_TARGET = `http://${INTERNAL_GATEWAY_HOST}:${INTERNAL_GATEWAY_PORT}
 const GATEWAY_BIND = "loopback";
 
 // Always run the built-from-source CLI entry directly to avoid PATH/global-install mismatches.
-const OPENCLAW_ENTRY =
-  process.env.OPENCLAW_ENTRY?.trim() || "/openclaw/dist/entry.js";
+const OPENCLAW_ENTRY = process.env.OPENCLAW_ENTRY?.trim() || "/openclaw/dist/entry.js";
 const OPENCLAW_NODE = process.env.OPENCLAW_NODE?.trim() || "node";
 
 function clawArgs(args) {
@@ -141,7 +137,9 @@ async function waitForGatewayReady(opts = {}) {
         try {
           const res = await fetch(`${GATEWAY_TARGET}${p}`, { method: "GET" });
           // Any HTTP response means the port is open.
-          if (res) return true;
+          if (res) {
+            return true;
+          }
         } catch {
           // try next
         }
@@ -155,8 +153,12 @@ async function waitForGatewayReady(opts = {}) {
 }
 
 async function startGateway() {
-  if (gatewayProc) return;
-  if (!isConfigured()) throw new Error("Gateway cannot start: not configured");
+  if (gatewayProc) {
+    return;
+  }
+  if (!isConfigured()) {
+    throw new Error("Gateway cannot start: not configured");
+  }
 
   fs.mkdirSync(STATE_DIR, { recursive: true });
   fs.mkdirSync(WORKSPACE_DIR, { recursive: true });
@@ -182,8 +184,7 @@ async function startGateway() {
       OPENCLAW_WORKSPACE_DIR: WORKSPACE_DIR,
       // Backward-compat aliases
       CLAWDBOT_STATE_DIR: process.env.CLAWDBOT_STATE_DIR || STATE_DIR,
-      CLAWDBOT_WORKSPACE_DIR:
-        process.env.CLAWDBOT_WORKSPACE_DIR || WORKSPACE_DIR,
+      CLAWDBOT_WORKSPACE_DIR: process.env.CLAWDBOT_WORKSPACE_DIR || WORKSPACE_DIR,
     },
   });
 
@@ -199,8 +200,12 @@ async function startGateway() {
 }
 
 async function ensureGatewayRunning() {
-  if (!isConfigured()) return { ok: false, reason: "not configured" };
-  if (gatewayProc) return { ok: true };
+  if (!isConfigured()) {
+    return { ok: false, reason: "not configured" };
+  }
+  if (gatewayProc) {
+    return { ok: true };
+  }
   if (!gatewayStarting) {
     gatewayStarting = (async () => {
       await startGateway();
@@ -230,14 +235,43 @@ async function restartGateway() {
   return ensureGatewayRunning();
 }
 
+function notifyGatewayReady(port) {
+  const readyNotifyUrl = process.env.AGENT_GATEWAY_READY_NOTIFY_URL?.trim() || "";
+  if (!readyNotifyUrl) {
+    return;
+  }
+
+  void (async () => {
+    try {
+      const parsed = new URL(readyNotifyUrl);
+      const redacted = `${parsed.origin}${parsed.pathname}`;
+      console.log(`[wrapper] sending gateway ready notification to ${redacted}`);
+      const resp = await fetch(readyNotifyUrl, {
+        method: "GET",
+        headers: {
+          "X-OpenClaw-Gateway-Port": String(port),
+          "User-Agent": "OpenClaw/Gateway",
+        },
+      });
+      if (!resp.ok) {
+        console.warn(`[wrapper] gateway ready notification to ${redacted} returned ${resp.status}`);
+      } else {
+        console.log(
+          `[wrapper] gateway ready notification to ${redacted} succeeded (${resp.status})`,
+        );
+      }
+    } catch (err) {
+      console.warn(`[wrapper] failed to send gateway ready notification: ${String(err)}`);
+    }
+  })();
+}
+
 function requireSetupAuth(req, res, next) {
   if (!SETUP_PASSWORD) {
     return res
       .status(500)
       .type("text/plain")
-      .send(
-        "SETUP_PASSWORD is not set. Set it in Railway Variables before using /setup.",
-      );
+      .send("SETUP_PASSWORD is not set. Set it in Railway Variables before using /setup.");
   }
 
   const header = req.headers.authorization || "";
@@ -273,8 +307,7 @@ function runCmd(cmd, args, opts = {}) {
         OPENCLAW_WORKSPACE_DIR: WORKSPACE_DIR,
         // Backward-compat aliases
         CLAWDBOT_STATE_DIR: process.env.CLAWDBOT_STATE_DIR || STATE_DIR,
-        CLAWDBOT_WORKSPACE_DIR:
-          process.env.CLAWDBOT_WORKSPACE_DIR || WORKSPACE_DIR,
+        CLAWDBOT_WORKSPACE_DIR: process.env.CLAWDBOT_WORKSPACE_DIR || WORKSPACE_DIR,
       },
     });
 
@@ -292,7 +325,9 @@ function runCmd(cmd, args, opts = {}) {
 }
 
 function redactSecrets(text) {
-  if (!text) return text;
+  if (!text) {
+    return text;
+  }
   // Very small best-effort redaction. (Config paths/values may still contain secrets.)
   return String(text)
     .replace(/(sk-[A-Za-z0-9_-]{10,})/g, "[REDACTED]")
@@ -350,9 +385,7 @@ app.post("/setup/api/console/run", requireSetupAuth, async (req, res) => {
       const r = await ensureGatewayRunning();
       return res.json({
         ok: Boolean(r.ok),
-        output: r.ok
-          ? "Gateway started.\n"
-          : `Gateway not started: ${r.reason}\n`,
+        output: r.ok ? "Gateway started.\n" : `Gateway not started: ${r.reason}\n`,
       });
     }
 
@@ -381,23 +414,16 @@ app.post("/setup/api/console/run", requireSetupAuth, async (req, res) => {
         .json({ ok: r.code === 0, output: redactSecrets(r.output) });
     }
     if (cmd === "openclaw.logs.tail") {
-      const lines = Math.max(
-        50,
-        Math.min(1000, Number.parseInt(arg || "200", 10) || 200),
-      );
-      const r = await runCmd(
-        OPENCLAW_NODE,
-        clawArgs(["logs", "--tail", String(lines)]),
-      );
+      const lines = Math.max(50, Math.min(1000, Number.parseInt(arg || "200", 10) || 200));
+      const r = await runCmd(OPENCLAW_NODE, clawArgs(["logs", "--tail", String(lines)]));
       return res
         .status(r.code === 0 ? 200 : 500)
         .json({ ok: r.code === 0, output: redactSecrets(r.output) });
     }
     if (cmd === "openclaw.config.get") {
-      if (!arg)
-        return res
-          .status(400)
-          .json({ ok: false, error: "Missing config path" });
+      if (!arg) {
+        return res.status(400).json({ ok: false, error: "Missing config path" });
+      }
       const r = await runCmd(OPENCLAW_NODE, clawArgs(["config", "get", arg]));
       return res
         .status(r.code === 0 ? 200 : 500)
@@ -445,14 +471,10 @@ const server = app.listen(PORT, "0.0.0.0", () => {
   console.log(`[wrapper] listening on :${PORT}`);
   console.log(`[wrapper] state dir: ${STATE_DIR}`);
   console.log(`[wrapper] workspace dir: ${WORKSPACE_DIR}`);
-  console.log(
-    `[wrapper] gateway token: ${OPENCLAW_GATEWAY_TOKEN ? "(set)" : "(missing)"}`,
-  );
+  console.log(`[wrapper] gateway token: ${OPENCLAW_GATEWAY_TOKEN ? "(set)" : "(missing)"}`);
   console.log(`[wrapper] gateway target: ${GATEWAY_TARGET}`);
   if (!SETUP_PASSWORD) {
-    console.warn(
-      "[wrapper] WARNING: SETUP_PASSWORD is not set; /setup will error.",
-    );
+    console.warn("[wrapper] WARNING: SETUP_PASSWORD is not set; /setup will error.");
   }
   // Don't start gateway unless configured; proxy will ensure it starts.
   console.log(`[wrapper] Checking if configured: ${isConfigured()}`);
@@ -460,14 +482,13 @@ const server = app.listen(PORT, "0.0.0.0", () => {
     console.log(`[wrapper] Starting gateway immediately...`);
     ensureGatewayRunning()
       .then((result) => {
-        console.log(
-          `[wrapper] Gateway start result: ${JSON.stringify(result)}`,
-        );
+        console.log(`[wrapper] Gateway start result: ${JSON.stringify(result)}`);
+        if (result?.ok) {
+          notifyGatewayReady(INTERNAL_GATEWAY_PORT);
+        }
       })
       .catch((err) => {
-        console.error(
-          `[wrapper] Failed to start gateway immediately: ${String(err)}`,
-        );
+        console.error(`[wrapper] Failed to start gateway immediately: ${String(err)}`);
       });
   } else {
     console.log(`[wrapper] Gateway not configured, skipping immediate start`);
@@ -491,7 +512,9 @@ server.on("upgrade", async (req, socket, head) => {
 process.on("SIGTERM", () => {
   // Best-effort shutdown
   try {
-    if (gatewayProc) gatewayProc.kill("SIGTERM");
+    if (gatewayProc) {
+      gatewayProc.kill("SIGTERM");
+    }
   } catch {
     // ignore
   }
