@@ -6,9 +6,8 @@ read_when:
 title: "Railway"
 ---
 
-Deploy OpenClaw on Railway with a one-click template and finish setup in your browser.
-This is the easiest "no terminal on the server" path: Railway runs the Gateway for you,
-and you configure everything via the `/setup` web wizard.
+Deploy OpenClaw on Railway with a one-click template and access it through the web Control UI.
+This is the easiest "no terminal on the server" path: Railway runs the Gateway for you.
 
 ## Quick checklist (new users)
 
@@ -20,11 +19,7 @@ and you configure everything via the `/setup` web wizard.
 
 ## One-click deploy
 
-<a
-  href="https://railway.com/deploy/clawdbot-railway-template"
-  target="_blank"
-  rel="noreferrer"
->
+<a href="https://railway.com/deploy/clawdbot-railway-template" target="_blank" rel="noreferrer">
   Deploy on Railway
 </a>
 
@@ -42,12 +37,9 @@ Then open:
 ## What you get
 
 - Hosted OpenClaw Gateway + Control UI
-- Web setup wizard at `/setup` (no terminal commands)
 - Persistent storage via Railway Volume (`/data`) so `openclaw.json`,
   per-agent `auth-profiles.json`, channel/provider state, sessions, and
   workspace survive redeploys
-- Backup export at `/setup/export` to migrate off Railway later
-- Automatic cloud environment detection for proper network binding
 
 ## Required Railway settings
 
@@ -67,62 +59,10 @@ Attach a volume mounted at:
 
 Set these variables on the service:
 
-#### Required
-
-- `SETUP_PASSWORD` (required) — Protects the /setup web UI
-- `PORT=8080` (required) — Must match the port in Public Networking
-
-#### Recommended
-
-- `OPENCLAW_STATE_DIR=/data/.openclaw` — Where config and state are stored
-- `OPENCLAW_WORKSPACE_DIR=/data/workspace` — Where workspace files are stored
-- `OPENCLAW_GATEWAY_TOKEN` — Admin secret for gateway authentication (auto-generated if not set)
-
-#### Telegram Security (Highly Recommended)
-
-For security, Telegram DMs default to **pairing mode** (not open). To allow specific users:
-
-- `TELEGRAM_DM_POLICY=pairing` (default, recommended) — Requires pairing code for DMs
-- `TELEGRAM_ALLOW_FROM='["@yourusername"]'` — JSON array of allowed Telegram usernames
-
-**Example: Allow only `@johnsonsun`:**
-
-```
-TELEGRAM_DM_POLICY=pairing
-TELEGRAM_ALLOW_FROM='["@johnsonsun"]'
-```
-
-**To allow anyone (NOT recommended for production):**
-
-```
-TELEGRAM_DM_POLICY=open
-TELEGRAM_ALLOW_FROM='["*"]'
-```
-
-**Note:** When using pairing mode:
-
-1. User sends a message to your bot in Telegram
-2. Bot responds with a pairing code (e.g., "ABC123")
-3. You approve the pairing code via the setup UI at `/setup`
-4. Once approved, user can interact with the bot
-
-## Network Architecture
-
-Railway deployments use a **wrapper + gateway** architecture:
-
-- **Wrapper** (port 8080): HTTP server that provides the /setup UI and proxies requests to the gateway
-- **Gateway** (port 18789): OpenClaw gateway that handles agent communication
-  - In cloud: Binds to `0.0.0.0` (lan mode) on internal port 18789
-  - In local: Binds to `127.0.0.1` (loopback) on port 18789
-- **Wrapper proxy**: Routes external traffic from port 8080 to gateway on port 18789
-
-Cloud auto-detection: Gateway automatically binds to `0.0.0.0` in Railway/cloud environments for proper network interface access.
-
-This architecture ensures:
-
-- Secure local binding in local/development environments
-- Proper network connectivity in cloud environments
-- Easy setup via web UI without SSH access
+- `OPENCLAW_GATEWAY_PORT=8080` (required — must match the port in Public Networking)
+- `OPENCLAW_GATEWAY_TOKEN` (required; treat as an admin secret)
+- `OPENCLAW_STATE_DIR=/data/.openclaw` (recommended)
+- `OPENCLAW_WORKSPACE_DIR=/data/workspace` (recommended)
 
 ## Connect a channel
 
@@ -131,32 +71,6 @@ Use the Control UI at `/openclaw` or run `openclaw onboard` via Railway's shell 
 - [Telegram](/channels/telegram) (fastest — just a bot token)
 - [Discord](/channels/discord)
 - [All channels](/channels)
-
-## Security Best Practices
-
-1. **Always set SETUP_PASSWORD** to protect the setup UI
-2. **Use TELEGRAM_DM_POLICY=pairing** (default) instead of "open"
-3. **Specify TELEGRAM_ALLOW_FROM** with your specific username(s)
-4. **Set a strong OPENCLAW_GATEWAY_TOKEN** for gateway authentication
-5. **Use Railway's environment variable encryption** for sensitive tokens
-
-## Troubleshooting
-
-### Gateway unreachable
-
-If you see "Gateway unreachable" errors:
-
-1. Check that Railway has assigned and exposed port 8080
-2. Verify `PORT=8080` environment variable is set
-3. Ensure the service is running (check Railway logs)
-4. Gateway auto-detects cloud environment via `RAILWAY_*` env vars
-
-### Telegram bot not responding
-
-1. Verify `TELEGRAM_TOKEN` is set correctly
-2. Check bot token hasn't been revoked in @BotFather
-3. If using pairing mode, approve pairing code via `/setup` UI
-4. Verify bot has necessary permissions in Telegram groups
 
 ## Backups & migration
 

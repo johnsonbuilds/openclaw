@@ -1,7 +1,6 @@
 name: Auto response
 
 on:
-  workflow_dispatch:
   issues:
     types: [opened, edited, labeled]
   issue_comment:
