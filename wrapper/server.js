@@ -483,7 +483,7 @@ const server = app.listen(PORT, "0.0.0.0", () => {
     ensureGatewayRunning()
       .then((result) => {
         console.log(`[wrapper] Gateway start result: ${JSON.stringify(result)}`);
-        if (result?.ok) {
+        if (result?.ok === true) {
           notifyGatewayReady(INTERNAL_GATEWAY_PORT);
         }
       })
