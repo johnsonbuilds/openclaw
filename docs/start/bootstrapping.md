@@ -20,8 +20,8 @@ On the first agent run, OpenClaw bootstraps the workspace (default
 `~/.openclaw/workspace`):
 
 - Seeds `AGENTS.md`, `BOOTSTRAP.md`, `IDENTITY.md`, `USER.md`.
-- Runs a short Q&A ritual (one question at a time).
-- Writes identity + preferences to `IDENTITY.md`, `USER.md`, `SOUL.md`.
+- Starts with a short task-first prompt so the user can immediately ask for help.
+- Defers identity + preference capture until it is useful, then writes durable details to `IDENTITY.md`, `USER.md`, `SOUL.md`.
 - Removes `BOOTSTRAP.md` when finished so it only runs once.
 
 ## Where it runs

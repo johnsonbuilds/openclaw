@@ -15,10 +15,10 @@ extension OnboardingView {
             guard self.onboardingChatModel.messages.isEmpty else { return }
             let kickoff =
                 "Hi! I just installed OpenClaw and you’re my brand‑new agent. " +
-                "Please start the first‑run ritual from BOOTSTRAP.md, ask one question at a time, " +
-                "and before we talk about WhatsApp/Telegram, visit soul.md with me to craft SOUL.md: " +
-                "ask what matters to me and how you should be. Then guide me through choosing " +
-                "how we should talk (web‑only, WhatsApp, or Telegram)."
+                "Please follow BOOTSTRAP.md in task-first mode. Start by asking exactly: " +
+                "👉 What do you want me to do? Then offer short examples like analyze a file, " +
+                "build an automation, or set up a voice agent. Help with the task first, and only " +
+                "personalize identity or SOUL.md later if it becomes useful."
             self.onboardingChatModel.input = kickoff
             self.onboardingChatModel.send()
         }

@@ -93,13 +93,14 @@
   - 支持 `AGENT_GATEWAY_READY_NOTIFY_URL` ready 通知。
   - 支持 websocket 代理。
 
-  ### 5. `extensions/telegram/src/polling-conflict-alert.ts`
-  - 差异摘要：新增一个独立的 Telegram polling 冲突告警器，用于在 `getUpdates conflict` 时向机器人所有者主动发送 Telegram 提示。
-  - 修改目的：当 bot token 被其他实例或第三方程序同时占用时，把问题直接通知到可处理该问题的 owner/operator，而不只是停留在后端日志。
-  - 涉及功能 / 行为变化：
-    - 复用 Telegram 现有 owner / approver 解析语义，优先使用 `execApprovals.approvers`，否则回退到从 `allowFrom` 和直连 `defaultTo` 推断的数字 Telegram 用户 ID。
-    - 使用独立 helper 封装告警文案、发送逻辑和冷却窗口，减少对 upstream 主 polling 逻辑的侵入。
-    - 同一 owner 默认带 15 分钟冷却，避免冲突持续期间反复刷屏。
+### 5. `extensions/telegram/src/polling-conflict-alert.ts`
+
+- 差异摘要：新增一个独立的 Telegram polling 冲突告警器，用于在 `getUpdates conflict` 时向机器人所有者主动发送 Telegram 提示。
+- 修改目的：当 bot token 被其他实例或第三方程序同时占用时，把问题直接通知到可处理该问题的 owner/operator，而不只是停留在后端日志。
+- 涉及功能 / 行为变化：
+  - 复用 Telegram 现有 owner / approver 解析语义，优先使用 `execApprovals.approvers`，否则回退到从 `allowFrom` 和直连 `defaultTo` 推断的数字 Telegram 用户 ID。
+  - 使用独立 helper 封装告警文案、发送逻辑和冷却窗口，减少对 upstream 主 polling 逻辑的侵入。
+  - 同一 owner 默认带 15 分钟冷却，避免冲突持续期间反复刷屏。
 
 ### 修改文件
 
@@ -213,29 +214,32 @@
   - 依赖面扩大，锁文件随之变化。
   - 这些包进入生产依赖集合。
 
-  ### 14. `extensions/telegram/src/monitor.ts`
-  - 差异摘要：Telegram monitor 在 polling 模式下新增接入 `getUpdates conflict` owner 告警器。
-  - 修改目的：把冲突告警挂在启动监控与 polling session 的装配层，尽量局部化改动，降低后续同步 upstream 的冲突范围。
-  - 涉及功能 / 行为变化：
-    - 为每个 Telegram account 创建独立的 conflict alerter。
-    - 在不改变原有 polling 重试结构的前提下，把 owner 通知能力以回调形式注入 polling session。
+### 14. `extensions/telegram/src/monitor.ts`
 
-  ### 15. `extensions/telegram/src/polling-session.ts`
-  - 差异摘要：在识别到 Telegram `getUpdates conflict` 时，除原有日志和重试外，新增触发 owner 通知。
-  - 修改目的：让该类冲突从“仅后端可见”变成“owner 可直接收到 Telegram 告警”，同时保持核心 polling 逻辑改动最小。
-  - 涉及功能 / 行为变化：
-    - `409 getUpdates conflict` 分支会调用独立注入的通知函数。
-    - 通知失败不会中断原有冲突恢复流程，仍继续保留日志与自动重试。
+- 差异摘要：Telegram monitor 在 polling 模式下新增接入 `getUpdates conflict` owner 告警器。
+- 修改目的：把冲突告警挂在启动监控与 polling session 的装配层，尽量局部化改动，降低后续同步 upstream 的冲突范围。
+- 涉及功能 / 行为变化：
+  - 为每个 Telegram account 创建独立的 conflict alerter。
+  - 在不改变原有 polling 重试结构的前提下，把 owner 通知能力以回调形式注入 polling session。
 
-  ### 16. `extensions/telegram/src/polling-conflict-alert.test.ts`
-  - 差异摘要：新增针对 Telegram polling 冲突 owner 告警器的定向测试。
-  - 修改目的：为 fork 新增的 owner 告警行为提供独立测试覆盖，减少将来同步时回归风险。
-  - 涉及功能 / 行为变化：
-    - 覆盖 owner 解析后正常发信。
-    - 覆盖冷却窗口内抑制重复告警。
-    - 覆盖无法解析 owner 时仅记录日志、不发送消息。
+### 15. `extensions/telegram/src/polling-session.ts`
 
-  ### 17. `src/agents/pi-embedded-helpers/errors.ts`
+- 差异摘要：在识别到 Telegram `getUpdates conflict` 时，除原有日志和重试外，新增触发 owner 通知。
+- 修改目的：让该类冲突从“仅后端可见”变成“owner 可直接收到 Telegram 告警”，同时保持核心 polling 逻辑改动最小。
+- 涉及功能 / 行为变化：
+  - `409 getUpdates conflict` 分支会调用独立注入的通知函数。
+  - 通知失败不会中断原有冲突恢复流程，仍继续保留日志与自动重试。
+
+### 16. `extensions/telegram/src/polling-conflict-alert.test.ts`
+
+- 差异摘要：新增针对 Telegram polling 冲突 owner 告警器的定向测试。
+- 修改目的：为 fork 新增的 owner 告警行为提供独立测试覆盖，减少将来同步时回归风险。
+- 涉及功能 / 行为变化：
+  - 覆盖 owner 解析后正常发信。
+  - 覆盖冷却窗口内抑制重复告警。
+  - 覆盖无法解析 owner 时仅记录日志、不发送消息。
+
+### 17. `src/agents/pi-embedded-helpers/errors.ts`
 
 - 差异摘要：rate limit 用户提示从通用“稍后重试”改成引导用户添加 / 切换 API key。
 - 修改目的：把“额度 / 限流”问题引导到本 fork 希望的商业或 BYOK 流程上。
@@ -287,3 +291,32 @@
 - 涉及功能 / 行为变化：
   - `loopback` 模式现在始终返回 `127.0.0.1`。
   - 去掉极端情况下自动退化为 LAN 监听的行为。
+
+### 24. `docs/reference/templates/BOOTSTRAP.md`
+
+- 差异摘要：将首启 bootstrap 模板从 identity-first / persona-first 改为 task-first。
+- 修改目的：避免用户首次连上实例或首次通过 Telegram 等入口开始对话时，被冗长的人格配置问卷打断，优先让用户进入“任务态”。
+- 涉及功能 / 行为变化：
+  - 首句改为明确要求先问 `👉 What do you want me to do?`。
+  - 增加少量任务示例（如 analyze a file / build an automation / set up a voice agent），帮助用户快速进入任务表达。
+  - 明确要求：如果用户给了任务，就先做任务，不要先做身份设定。
+  - `SOUL.md`、命名、vibe、emoji 等人格信息收集改为延后、可选、渐进式，不再作为首次对话前置门槛。
+  - 删除 `BOOTSTRAP.md` 的条件放宽为“用户已进入正常任务对话”，而不是必须先完整做完人格配置。
+
+### 25. `apps/macos/Sources/OpenClaw/OnboardingView+Chat.swift`
+
+- 差异摘要：macOS onboarding chat 的 kickoff 文案改为显式要求 task-first bootstrap。
+- 修改目的：让应用侧自动发出的首条引导消息与 fork 的 task-first bootstrap 语义保持一致，避免仍旧把用户导向先配置 `SOUL.md` / persona。
+- 涉及功能 / 行为变化：
+  - 启动文案不再要求“先访问 `SOUL.md` 再讨论 WhatsApp/Telegram”。
+  - 改为明确提示 agent 按 `BOOTSTRAP.md` 进入 task-first 模式。
+  - 明确给出首句和示例方向，要求先帮助用户完成任务，再在需要时补做 identity / `SOUL.md` 个性化。
+
+### 26. `docs/start/bootstrapping.md`
+
+- 差异摘要：启动文档同步更新为 task-first bootstrap 描述。
+- 修改目的：让文档对首次启动体验的描述与 fork 的实际行为一致，避免保留 upstream 或旧版本的人格优先叙述。
+- 涉及功能 / 行为变化：
+  - 文档不再描述“先进行一轮身份问答”。
+  - 改为说明首次启动先用简短 task-first 提示让用户直接提需求。
+  - 身份与偏好信息采集改为在后续有用时再写入 `IDENTITY.md`、`USER.md`、`SOUL.md`。
