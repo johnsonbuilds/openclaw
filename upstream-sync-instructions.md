@@ -93,6 +93,14 @@
   - 支持 `AGENT_GATEWAY_READY_NOTIFY_URL` ready 通知。
   - 支持 websocket 代理。
 
+  ### 5. `extensions/telegram/src/polling-conflict-alert.ts`
+  - 差异摘要：新增一个独立的 Telegram polling 冲突告警器，用于在 `getUpdates conflict` 时向机器人所有者主动发送 Telegram 提示。
+  - 修改目的：当 bot token 被其他实例或第三方程序同时占用时，把问题直接通知到可处理该问题的 owner/operator，而不只是停留在后端日志。
+  - 涉及功能 / 行为变化：
+    - 复用 Telegram 现有 owner / approver 解析语义，优先使用 `execApprovals.approvers`，否则回退到从 `allowFrom` 和直连 `defaultTo` 推断的数字 Telegram 用户 ID。
+    - 使用独立 helper 封装告警文案、发送逻辑和冷却窗口，减少对 upstream 主 polling 逻辑的侵入。
+    - 同一 owner 默认带 15 分钟冷却，避免冲突持续期间反复刷屏。
+
 ### 修改文件
 
 ### 1. `Dockerfile`
@@ -205,21 +213,43 @@
   - 依赖面扩大，锁文件随之变化。
   - 这些包进入生产依赖集合。
 
-### 15. `src/agents/pi-embedded-helpers/errors.ts`
+  ### 14. `extensions/telegram/src/monitor.ts`
+  - 差异摘要：Telegram monitor 在 polling 模式下新增接入 `getUpdates conflict` owner 告警器。
+  - 修改目的：把冲突告警挂在启动监控与 polling session 的装配层，尽量局部化改动，降低后续同步 upstream 的冲突范围。
+  - 涉及功能 / 行为变化：
+    - 为每个 Telegram account 创建独立的 conflict alerter。
+    - 在不改变原有 polling 重试结构的前提下，把 owner 通知能力以回调形式注入 polling session。
+
+  ### 15. `extensions/telegram/src/polling-session.ts`
+  - 差异摘要：在识别到 Telegram `getUpdates conflict` 时，除原有日志和重试外，新增触发 owner 通知。
+  - 修改目的：让该类冲突从“仅后端可见”变成“owner 可直接收到 Telegram 告警”，同时保持核心 polling 逻辑改动最小。
+  - 涉及功能 / 行为变化：
+    - `409 getUpdates conflict` 分支会调用独立注入的通知函数。
+    - 通知失败不会中断原有冲突恢复流程，仍继续保留日志与自动重试。
+
+  ### 16. `extensions/telegram/src/polling-conflict-alert.test.ts`
+  - 差异摘要：新增针对 Telegram polling 冲突 owner 告警器的定向测试。
+  - 修改目的：为 fork 新增的 owner 告警行为提供独立测试覆盖，减少将来同步时回归风险。
+  - 涉及功能 / 行为变化：
+    - 覆盖 owner 解析后正常发信。
+    - 覆盖冷却窗口内抑制重复告警。
+    - 覆盖无法解析 owner 时仅记录日志、不发送消息。
+
+  ### 17. `src/agents/pi-embedded-helpers/errors.ts`
 
 - 差异摘要：rate limit 用户提示从通用“稍后重试”改成引导用户添加 / 切换 API key。
 - 修改目的：把“额度 / 限流”问题引导到本 fork 希望的商业或 BYOK 流程上。
 - 涉及功能 / 行为变化：
   - 用户看到限流提示时，会被引导到 `getclawcloud.com` 的 API key 页面，而不是单纯等待。
 
-### 16. `src/agents/system-prompt.test.ts`
+### 18. `src/agents/system-prompt.test.ts`
 
 - 差异摘要：测试新增对 “Value-First Response Strategy” 段落的断言。
 - 修改目的：确保系统提示词确实包含 fork 自己加的回复策略。
 - 涉及功能 / 行为变化：
   - minimal prompt 和完整 prompt 的测试都要求出现这段策略内容。
 
-### 17. `src/agents/system-prompt.ts`
+### 19. `src/agents/system-prompt.ts`
 
 - 差异摘要：新增 `buildValueFirstResponseSection()`，并把该 section 注入系统提示词；同时把原先工具调用风格 fallback 里的标题行去掉。
 - 修改目的：改变助手在“提到外部工具 / 系统”场景下的默认表达顺序，让回答更偏产品导向。
@@ -228,14 +258,14 @@
   - minimal / sub-agent prompt 也会带上这条策略。
   - prompt 结构略有变化，工具调用风格部分的标题层级减少一层。
 
-### 18. `src/agents/workspace.defaults.test.ts`
+### 20. `src/agents/workspace.defaults.test.ts`
 
 - 差异摘要：新增测试，断言显式设置 `OPENCLAW_WORKSPACE_DIR` 时优先使用它。
 - 修改目的：覆盖 fork 对 workspace 路径解析的自定义环境变量行为。
 - 涉及功能 / 行为变化：
   - 测试确认 `OPENCLAW_HOME` / `HOME` 不再总是优先，显式 workspace 路径会覆盖默认推导。
 
-### 19. `src/agents/workspace.ts`
+### 21. `src/agents/workspace.ts`
 
 - 差异摘要：默认 workspace 目录解析逻辑新增 `OPENCLAW_WORKSPACE_DIR` / `CLAWDBOT_WORKSPACE_DIR` 覆盖项。
 - 修改目的：让容器部署可以稳定指定 workspace 位置，不依赖 home 目录规则。
@@ -243,14 +273,14 @@
   - 若设置了显式 workspace 环境变量，则直接使用它。
   - 否则才回退到原先基于 `OPENCLAW_HOME` / `HOME` 的默认解析逻辑。
 
-### 20. `src/dockerfile.test.ts`
+### 22. `src/dockerfile.test.ts`
 
 - 差异摘要：测试中的 Playwright CLI 路径断言跟随 Dockerfile 一起改成 `/openclaw/node_modules/...`。
 - 修改目的：保持测试与新的镜像布局一致。
 - 涉及功能 / 行为变化：
   - Dockerfile 测试基线更新为 wrapper 改造后的镜像目录结构。
 
-### 21. `src/gateway/net.ts`
+### 23. `src/gateway/net.ts`
 
 - 差异摘要：当 bind mode 为 `loopback` 时，不再在 127.0.0.1 不可绑定时回退到 `0.0.0.0`。
 - 修改目的：强化“loopback 就必须只绑定本机”的安全语义，避免意外对外暴露。

@@ -52,6 +52,7 @@ type TelegramPollingSessionOpts = {
   getLastUpdateId: () => number | null;
   persistUpdateId: (updateId: number) => Promise<void>;
   log: (line: string) => void;
+  notifyGetUpdatesConflict?: () => Promise<void>;
   /** Pre-resolved Telegram transport to reuse across bot instances */
   telegramTransport?: TelegramTransport;
   /** Rebuild Telegram transport after stall/network recovery when marked dirty. */
@@ -399,6 +400,13 @@ export class TelegramPollingSession {
       const isConflict = isGetUpdatesConflict(err);
       if (isConflict) {
         this.#webhookCleared = false;
+        try {
+          await this.opts.notifyGetUpdatesConflict?.();
+        } catch (notifyErr) {
+          this.opts.log(
+            `[telegram] Failed to notify owner about getUpdates conflict: ${formatErrorMessage(notifyErr)}`,
+          );
+        }
       }
       const isRecoverable = isRecoverableTelegramNetworkError(err, { context: "polling" });
       if (isRecoverable) {

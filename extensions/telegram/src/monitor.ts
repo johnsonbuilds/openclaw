@@ -14,6 +14,7 @@ import {
   isRecoverableTelegramNetworkError,
   isTelegramPollingNetworkError,
 } from "./network-errors.js";
+import { TelegramGetUpdatesConflictAlerter } from "./polling-conflict-alert.js";
 import { makeProxyFetch } from "./proxy.js";
 
 export type MonitorTelegramOpts = {
@@ -231,6 +232,12 @@ export async function monitorTelegramProvider(opts: MonitorTelegramOpts = {}) {
         network: account.config.network,
       });
     const telegramTransport = createTelegramTransportForPolling();
+    const getUpdatesConflictAlerter = new TelegramGetUpdatesConflictAlerter({
+      cfg,
+      token,
+      accountId: account.accountId,
+      log,
+    });
 
     pollingSession = new TelegramPollingSession({
       token,
@@ -243,6 +250,7 @@ export async function monitorTelegramProvider(opts: MonitorTelegramOpts = {}) {
       getLastUpdateId: () => lastUpdateId,
       persistUpdateId,
       log,
+      notifyGetUpdatesConflict: () => getUpdatesConflictAlerter.notify(),
       telegramTransport,
       createTelegramTransport: createTelegramTransportForPolling,
     });

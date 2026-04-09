@@ -114,6 +114,7 @@ function createPollingSessionWithTransportRestart(params: {
   abortSignal: AbortSignal;
   telegramTransport: ReturnType<typeof makeTelegramTransport>;
   createTelegramTransport: () => ReturnType<typeof makeTelegramTransport>;
+  notifyGetUpdatesConflict?: () => Promise<void>;
 }) {
   return new TelegramPollingSession({
     token: "tok",
@@ -126,6 +127,7 @@ function createPollingSessionWithTransportRestart(params: {
     getLastUpdateId: () => null,
     persistUpdateId: async () => undefined,
     log: () => undefined,
+    notifyGetUpdatesConflict: params.notifyGetUpdatesConflict,
     telegramTransport: params.telegramTransport,
     createTelegramTransport: params.createTelegramTransport,
   });
@@ -842,6 +844,7 @@ describe("TelegramPollingSession", () => {
 
   it("reuses the transport after a getUpdates conflict", async () => {
     const abort = new AbortController();
+    const notifyGetUpdatesConflict = vi.fn(async () => undefined);
     const conflictError = Object.assign(
       new Error("Conflict: terminated by other getUpdates request"),
       {
@@ -859,11 +862,13 @@ describe("TelegramPollingSession", () => {
       abortSignal: abort.signal,
       telegramTransport: transport1,
       createTelegramTransport,
+      notifyGetUpdatesConflict,
     });
 
     await session.runUntilAbort();
 
     expectTelegramBotTransportSequence(transport1, transport1);
     expect(createTelegramTransport).not.toHaveBeenCalled();
+    expect(notifyGetUpdatesConflict).toHaveBeenCalledTimes(1);
   });
 });
