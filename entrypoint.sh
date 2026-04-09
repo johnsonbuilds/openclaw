@@ -96,9 +96,64 @@ resolve_gateway_token_source() {
   echo "(unset)"
 }
 
+require_llm_env() {
+  : "${LLM_PROVIDER:?Error: LLM_PROVIDER environment variable is required but not set}"
+  : "${LLM_MODEL_ID:?Error: LLM_MODEL_ID environment variable is required but not set}"
+  : "${LLM_MODEL_NAME:?Error: LLM_MODEL_NAME environment variable is required but not set}"
+  : "${LLM_BASE_URL:?Error: LLM_BASE_URL environment variable is required but not set}"
+  : "${LLM_API_KEY:?Error: LLM_API_KEY environment variable is required but not set}"
+}
+
+update_llm_config_in_place() {
+  require_llm_env
+
+  node - "$CONFIG_FILE" <<'EOF'
+const fs = require("fs");
+
+const configPath = process.argv[2];
+const provider = process.env.LLM_PROVIDER;
+const modelId = process.env.LLM_MODEL_ID;
+const modelName = process.env.LLM_MODEL_NAME;
+const baseUrl = process.env.LLM_BASE_URL;
+const apiKey = process.env.LLM_API_KEY;
+
+const raw = fs.readFileSync(configPath, "utf8");
+const config = JSON.parse(raw);
+
+config.models ??= {};
+if (
+  !config.models.providers ||
+  typeof config.models.providers !== "object" ||
+  Array.isArray(config.models.providers)
+) {
+  config.models.providers = {};
+}
+config.models.providers[provider] = {
+  api: "openai-completions",
+  baseUrl,
+  apiKey,
+  models: [
+    {
+      id: modelId,
+      name: modelName,
+    },
+  ],
+};
+
+config.agents ??= {};
+config.agents.defaults ??= {};
+config.agents.defaults.model ??= {};
+config.agents.defaults.model.primary = `${provider}/${modelId}`;
+
+const tempPath = `${configPath}.tmp`;
+fs.writeFileSync(tempPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+fs.renameSync(tempPath, configPath);
+EOF
+}
+
 if [ "$OPENCLAW_CONFIG_EXISTS" -eq 1 ] && ! should_overwrite_config; then
-  echo "[entrypoint] existing config found at $CONFIG_FILE; keeping it (set OPENCLAW_FORCE_CONFIG=1 to overwrite)"
-  echo "[entrypoint] config mode: keep-existing"
+  echo "[entrypoint] existing config found at $CONFIG_FILE; updating LLM fields only (set OPENCLAW_FORCE_CONFIG=1 to rebuild config)"
+  echo "[entrypoint] config mode: update-llm-only"
 
   # Best-effort: keep permissions sane, but don't fail startup if chmod is unsupported.
   chmod 600 "$CONFIG_FILE" 2>/dev/null || true
@@ -117,15 +172,16 @@ if [ "$OPENCLAW_CONFIG_EXISTS" -eq 1 ] && ! should_overwrite_config; then
   else
     echo "[entrypoint] gateway token source: $(resolve_gateway_token_source)"
   fi
+
+  echo "[entrypoint] syncing LLM config from environment"
+  update_llm_config_in_place
+  CONFIG_STATUS_MESSAGE="✅ Existing configuration preserved; LLM fields updated at $CONFIG_FILE"
 else
   echo "[entrypoint] config mode: overwrite-defaults"
-  # 2. 设置默认值 (如果环境变量没传，用这些保底)
+  # 2. 校验 LLM 环境变量并生成配置
   # 注意：PORT 优先使用 Railway 注入的变量，如果没给则用你跑通的 18789
   APP_PORT=${PORT:-18789}
-  LLM_PROVIDER=${LLM_PROVIDER:-xai}
-  LLM_MODEL_ID=${LLM_MODEL_ID:-grok-4-1-fast-reasoning}
-  LLM_MODEL_NAME=${LLM_MODEL_NAME:-"Grok 4.1 Fast Reasoning"}
-  LLM_BASE_URL=${LLM_BASE_URL:-"https://api.x.ai/v1"}
+  require_llm_env
 
   # 自动生成随机 Gateway Token，如果环境变量没给的话
   GEN_GATEWAY_TOKEN=$(head /dev/urandom | tr -dc A-Za-z0-9 | head -c 32)
@@ -229,6 +285,7 @@ EOF
 
   # Keep wrapper/gateway token consistent with the generated config.
   export OPENCLAW_GATEWAY_TOKEN="$FINAL_GATEWAY_TOKEN"
+  CONFIG_STATUS_MESSAGE="✅ New configuration generated and secured at $CONFIG_FILE"
 fi
 
 # 告知包装层配置路径与 Token
@@ -237,7 +294,7 @@ export OPENCLAW_STATE_DIR
 export OPENCLAW_WORKSPACE_DIR
 export OPENCLAW_ENTRY="/openclaw/dist/entry.js"
 
-echo "✅ Configuration generated and secured at $CONFIG_FILE"
+echo "$CONFIG_STATUS_MESSAGE"
 echo "🚀 Starting Wrapper Server (server.js)..."
 
 # 必须通过 server.js 启动，才能正确代理流量

@@ -66,8 +66,10 @@
 - 涉及功能 / 行为变化：
   - 强制要求 `OPENCLAW_STATE_DIR`，并默认推导 `OPENCLAW_CONFIG_PATH` 与 `OPENCLAW_WORKSPACE_DIR`。
   - 根据 cgroup 内存上限自动设置 `NODE_OPTIONS --max-old-space-size`。
-  - 默认不覆盖已有配置，除非显式设置 `OPENCLAW_FORCE_CONFIG=1`。
-  - 生成配置文件 `openclaw.json`。
+  - 若 `openclaw.json` 不存在则生成；若已存在则默认不整体覆盖，而是仅同步 LLM 相关字段，除非显式设置 `OPENCLAW_FORCE_CONFIG=1`。
+  - 创建或更新 LLM 配置时，强制要求 `LLM_PROVIDER`、`LLM_MODEL_ID`、`LLM_MODEL_NAME`、`LLM_BASE_URL`、`LLM_API_KEY` 存在，不再使用默认兜底值。
+  - 已有配置场景下，会原地更新 `models.providers[LLM_PROVIDER]` 与 `agents.defaults.model.primary`，同时保留其他已有 provider、gateway token 和其余运行时配置不变。
+  - 生成配置文件 `openclaw.json`，并保持既有权限收敛逻辑。
   - 尝试复用已有 gateway token，避免重启后 token 漂移。
   - 更换启动入口。
 
