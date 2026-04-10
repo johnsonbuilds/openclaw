@@ -106,9 +106,9 @@ const [configPath, entrypointDir] = process.argv.slice(2);
 process.env.OPENCLAW_CONFIG_PATH = configPath;
 
 try {
-  const moduleUrl = pathToFileURL(path.join(entrypointDir, "dist/config/config.js")).href;
-  const { readConfigFileSnapshot } = await import(moduleUrl);
-  const snapshot = await readConfigFileSnapshot();
+  const moduleUrl = pathToFileURL(path.join(entrypointDir, "dist/plugin-sdk/config-runtime.js")).href;
+  const { readConfigFileSnapshotForWrite } = await import(moduleUrl);
+  const { snapshot } = await readConfigFileSnapshotForWrite();
   if (snapshot.exists && snapshot.valid) {
     process.exit(0);
   }
