@@ -121,8 +121,6 @@ require_llm_update_env() {
       : "${LLM_BASE_URL:?Error: LLM_BASE_URL environment variable is required but not set}"
       ;;
     *)
-      echo "Error: LLM_PROVIDER must be one of Default, OpenRouter, OpenAI, Anthropic, or Custom" >&2
-      exit 1
       ;;
   esac
 }
@@ -159,13 +157,8 @@ const providerMap = {
 };
 
 const selectedProvider = providerMap[providerChoice];
-if (providerChoice === "default") {
+if (providerChoice === "default" || !selectedProvider) {
   process.exit(0);
-}
-if (!selectedProvider) {
-  throw new Error(
-    "LLM_PROVIDER must be one of Default, OpenRouter, OpenAI, Anthropic, or Custom",
-  );
 }
 
 const raw = fs.readFileSync(configPath, "utf8");
@@ -248,11 +241,14 @@ if [ "$OPENCLAW_CONFIG_EXISTS" -eq 1 ] && ! should_overwrite_config; then
 
   echo "[entrypoint] syncing LLM config from environment"
   update_llm_config_in_place
-  if [ "$(printf '%s' "$LLM_PROVIDER" | tr '[:upper:]' '[:lower:]')" = "default" ]; then
-    CONFIG_STATUS_MESSAGE="✅ Existing configuration preserved; LLM fields left unchanged at $CONFIG_FILE"
-  else
+  case "$(printf '%s' "$LLM_PROVIDER" | tr '[:upper:]' '[:lower:]')" in
+    openrouter|openai|anthropic|custom)
     CONFIG_STATUS_MESSAGE="✅ Existing configuration preserved; LLM fields updated at $CONFIG_FILE"
-  fi
+      ;;
+    *)
+      CONFIG_STATUS_MESSAGE="✅ Existing configuration preserved; LLM fields left unchanged at $CONFIG_FILE"
+      ;;
+  esac
 else
   echo "[entrypoint] config mode: overwrite-defaults"
   # 2. 校验 LLM 环境变量并生成配置
