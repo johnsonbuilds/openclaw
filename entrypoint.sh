@@ -104,21 +104,74 @@ require_llm_env() {
   : "${LLM_API_KEY:?Error: LLM_API_KEY environment variable is required but not set}"
 }
 
+require_llm_update_env() {
+  : "${LLM_PROVIDER:?Error: LLM_PROVIDER environment variable is required but not set}"
+  : "${LLM_MODEL_ID:?Error: LLM_MODEL_ID environment variable is required but not set}"
+  : "${LLM_API_KEY:?Error: LLM_API_KEY environment variable is required but not set}"
+
+  case "$(printf '%s' "$LLM_PROVIDER" | tr '[:upper:]' '[:lower:]')" in
+    openrouter|openai|anthropic)
+      ;;
+    custom)
+      : "${LLM_MODEL_NAME:?Error: LLM_MODEL_NAME environment variable is required but not set}"
+      : "${LLM_BASE_URL:?Error: LLM_BASE_URL environment variable is required but not set}"
+      ;;
+    *)
+      echo "Error: LLM_PROVIDER must be one of OpenRouter, OpenAI, Anthropic, or Custom" >&2
+      exit 1
+      ;;
+  esac
+}
+
 update_llm_config_in_place() {
-  require_llm_env
+  require_llm_update_env
 
   node - "$CONFIG_FILE" <<'EOF'
 const fs = require("fs");
 
 const configPath = process.argv[2];
-const provider = process.env.LLM_PROVIDER;
+const providerChoice = String(process.env.LLM_PROVIDER ?? "").trim().toLowerCase();
 const modelId = process.env.LLM_MODEL_ID;
 const modelName = process.env.LLM_MODEL_NAME;
 const baseUrl = process.env.LLM_BASE_URL;
 const apiKey = process.env.LLM_API_KEY;
 
+const providerMap = {
+  openai: {
+    envKey: "OPENAI_API_KEY",
+    modelProvider: "openai",
+  },
+  anthropic: {
+    envKey: "ANTHROPIC_API_KEY",
+    modelProvider: "anthropic",
+  },
+  openrouter: {
+    envKey: "OPENROUTER_API_KEY",
+    modelProvider: "openrouter",
+  },
+  custom: {
+    modelProvider: "custom",
+  },
+};
+
+const selectedProvider = providerMap[providerChoice];
+if (!selectedProvider) {
+  throw new Error(
+    "LLM_PROVIDER must be one of OpenRouter, OpenAI, Anthropic, or Custom",
+  );
+}
+
 const raw = fs.readFileSync(configPath, "utf8");
 const config = JSON.parse(raw);
+
+config.env ??= {};
+if (!config.env || typeof config.env !== "object" || Array.isArray(config.env)) {
+  config.env = {};
+}
+
+for (const envKey of ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "OPENROUTER_API_KEY"]) {
+  delete config.env[envKey];
+}
 
 config.models ??= {};
 if (
@@ -128,22 +181,35 @@ if (
 ) {
   config.models.providers = {};
 }
-config.models.providers[provider] = {
-  api: "openai-completions",
-  baseUrl,
-  apiKey,
-  models: [
-    {
-      id: modelId,
-      name: modelName,
-    },
-  ],
-};
+
+for (const key of Object.keys(config.models.providers)) {
+  if (key.trim().toLowerCase() === "custom") {
+    delete config.models.providers[key];
+  }
+}
+
+if (selectedProvider.envKey) {
+  config.env[selectedProvider.envKey] = apiKey;
+}
+
+if (providerChoice === "custom") {
+  config.models.providers.custom = {
+    api: "openai-completions",
+    baseUrl,
+    apiKey,
+    models: [
+      {
+        id: modelId,
+        name: modelName,
+      },
+    ],
+  };
+}
 
 config.agents ??= {};
 config.agents.defaults ??= {};
 config.agents.defaults.model ??= {};
-config.agents.defaults.model.primary = `${provider}/${modelId}`;
+config.agents.defaults.model.primary = `${selectedProvider.modelProvider}/${modelId}`;
 
 const tempPath = `${configPath}.tmp`;
 fs.writeFileSync(tempPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
