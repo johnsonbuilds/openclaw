@@ -106,18 +106,22 @@ require_llm_env() {
 
 require_llm_update_env() {
   : "${LLM_PROVIDER:?Error: LLM_PROVIDER environment variable is required but not set}"
-  : "${LLM_MODEL_ID:?Error: LLM_MODEL_ID environment variable is required but not set}"
-  : "${LLM_API_KEY:?Error: LLM_API_KEY environment variable is required but not set}"
 
   case "$(printf '%s' "$LLM_PROVIDER" | tr '[:upper:]' '[:lower:]')" in
+    default)
+      ;;
     openrouter|openai|anthropic)
+      : "${LLM_MODEL_ID:?Error: LLM_MODEL_ID environment variable is required but not set}"
+      : "${LLM_API_KEY:?Error: LLM_API_KEY environment variable is required but not set}"
       ;;
     custom)
+      : "${LLM_MODEL_ID:?Error: LLM_MODEL_ID environment variable is required but not set}"
+      : "${LLM_API_KEY:?Error: LLM_API_KEY environment variable is required but not set}"
       : "${LLM_MODEL_NAME:?Error: LLM_MODEL_NAME environment variable is required but not set}"
       : "${LLM_BASE_URL:?Error: LLM_BASE_URL environment variable is required but not set}"
       ;;
     *)
-      echo "Error: LLM_PROVIDER must be one of OpenRouter, OpenAI, Anthropic, or Custom" >&2
+      echo "Error: LLM_PROVIDER must be one of Default, OpenRouter, OpenAI, Anthropic, or Custom" >&2
       exit 1
       ;;
   esac
@@ -155,9 +159,12 @@ const providerMap = {
 };
 
 const selectedProvider = providerMap[providerChoice];
+if (providerChoice === "default") {
+  process.exit(0);
+}
 if (!selectedProvider) {
   throw new Error(
-    "LLM_PROVIDER must be one of OpenRouter, OpenAI, Anthropic, or Custom",
+    "LLM_PROVIDER must be one of Default, OpenRouter, OpenAI, Anthropic, or Custom",
   );
 }
 
@@ -241,7 +248,11 @@ if [ "$OPENCLAW_CONFIG_EXISTS" -eq 1 ] && ! should_overwrite_config; then
 
   echo "[entrypoint] syncing LLM config from environment"
   update_llm_config_in_place
-  CONFIG_STATUS_MESSAGE="✅ Existing configuration preserved; LLM fields updated at $CONFIG_FILE"
+  if [ "$(printf '%s' "$LLM_PROVIDER" | tr '[:upper:]' '[:lower:]')" = "default" ]; then
+    CONFIG_STATUS_MESSAGE="✅ Existing configuration preserved; LLM fields left unchanged at $CONFIG_FILE"
+  else
+    CONFIG_STATUS_MESSAGE="✅ Existing configuration preserved; LLM fields updated at $CONFIG_FILE"
+  fi
 else
   echo "[entrypoint] config mode: overwrite-defaults"
   # 2. 校验 LLM 环境变量并生成配置
@@ -261,7 +272,7 @@ else
 
   echo "🛠️ Configuring OpenClaw for SaaS instance..."
 
-  # 3. 动态生成 JSON (根据你提供的 2026.1.30 格式)
+  # 3. 动态生成 JSON
   cat <<EOF > "$CONFIG_FILE"
 {
   "meta": {
