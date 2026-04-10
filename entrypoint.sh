@@ -10,6 +10,7 @@ OPENCLAW_WORKSPACE_DIR=${OPENCLAW_WORKSPACE_DIR:-$OPENCLAW_STATE_DIR/workspace}
 CONFIG_FILE="$OPENCLAW_CONFIG_PATH"
 CONFIG_DIR=$(dirname "$CONFIG_FILE")
 INTERNAL_GATEWAY_PORT=${INTERNAL_GATEWAY_PORT:-18789}
+ENTRYPOINT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 
 # Always bind the gateway to loopback so it is never directly exposed on the network.
 # External access should go through the wrapper (reverse proxy) only.
@@ -94,6 +95,93 @@ resolve_gateway_token_source() {
     return
   fi
   echo "(unset)"
+}
+
+validate_openclaw_config_file() {
+  node --input-type=module - "$1" "$ENTRYPOINT_DIR" <<'EOF'
+import path from "node:path";
+import { pathToFileURL } from "node:url";
+
+const [configPath, entrypointDir] = process.argv.slice(2);
+process.env.OPENCLAW_CONFIG_PATH = configPath;
+
+try {
+  const moduleUrl = pathToFileURL(path.join(entrypointDir, "dist/config/config.js")).href;
+  const { readConfigFileSnapshot } = await import(moduleUrl);
+  const snapshot = await readConfigFileSnapshot();
+  if (snapshot.exists && snapshot.valid) {
+    process.exit(0);
+  }
+
+  const issues = Array.isArray(snapshot?.issues) ? snapshot.issues : [];
+  const details = issues
+    .slice(0, 8)
+    .map((issue) => {
+      const issuePath = typeof issue?.path === "string" && issue.path.length > 0 ? issue.path : "<root>";
+      const issueMessage = typeof issue?.message === "string" ? issue.message : "invalid";
+      return `${issuePath}: ${issueMessage}`;
+    })
+    .join(" | ");
+  if (details) {
+    process.stderr.write(details + "\n");
+  }
+  process.exit(1);
+} catch (error) {
+  const message = error instanceof Error ? error.message : String(error);
+  process.stderr.write(message + "\n");
+  process.exit(1);
+}
+EOF
+}
+
+ensure_startup_config_is_valid() {
+  validation_stage="$1"
+
+  if [ ! -f "$CONFIG_FILE" ]; then
+    return 0
+  fi
+
+  if validation_error=$(validate_openclaw_config_file "$CONFIG_FILE" 2>&1); then
+    return 0
+  fi
+
+  backup_file="${CONFIG_FILE}.bak"
+
+  echo "[entrypoint] config recovery: stage=${validation_stage} status=current-invalid path=$CONFIG_FILE" >&2
+  if [ -n "$validation_error" ]; then
+    echo "[entrypoint] config recovery: current-error=$validation_error" >&2
+  fi
+
+  if [ ! -f "$backup_file" ]; then
+    echo "[entrypoint] config recovery: stage=${validation_stage} status=backup-missing path=$backup_file" >&2
+    return 1
+  fi
+
+  if ! backup_error=$(validate_openclaw_config_file "$backup_file" 2>&1); then
+    echo "[entrypoint] config recovery: stage=${validation_stage} status=backup-invalid path=$backup_file" >&2
+    if [ -n "$backup_error" ]; then
+      echo "[entrypoint] config recovery: backup-error=$backup_error" >&2
+    fi
+    return 1
+  fi
+
+  invalid_snapshot="${CONFIG_FILE}.invalid.$(date -u +%Y%m%dT%H%M%SZ)"
+  cp "$CONFIG_FILE" "$invalid_snapshot" 2>/dev/null || true
+  cp "$backup_file" "$CONFIG_FILE"
+  chmod 600 "$CONFIG_FILE" 2>/dev/null || true
+
+  if ! restored_error=$(validate_openclaw_config_file "$CONFIG_FILE" 2>&1); then
+    echo "[entrypoint] config recovery: stage=${validation_stage} status=restore-invalid path=$CONFIG_FILE" >&2
+    if [ -n "$restored_error" ]; then
+      echo "[entrypoint] config recovery: restore-error=$restored_error" >&2
+    fi
+    return 1
+  fi
+
+  echo "[entrypoint] config recovery: stage=${validation_stage} status=restored from=$backup_file to=$CONFIG_FILE" >&2
+  if [ -f "$invalid_snapshot" ]; then
+    echo "[entrypoint] config recovery: invalid-snapshot=$invalid_snapshot" >&2
+  fi
 }
 
 require_llm_env() {
@@ -225,6 +313,8 @@ if [ "$OPENCLAW_CONFIG_EXISTS" -eq 1 ] && ! should_overwrite_config; then
   chmod 600 "$CONFIG_FILE" 2>/dev/null || true
   chmod 700 "$CONFIG_DIR" 2>/dev/null || true
 
+  ensure_startup_config_is_valid "pre-update"
+
   # Keep gateway token stable across restarts by reusing the existing token from config
   # when no explicit env token is provided.
   if [ -z "${OPENCLAW_GATEWAY_TOKEN:-}" ] && [ -z "${CLAWDBOT_GATEWAY_TOKEN:-}" ] && [ -z "${GATEWAY_TOKEN:-}" ]; then
@@ -241,6 +331,7 @@ if [ "$OPENCLAW_CONFIG_EXISTS" -eq 1 ] && ! should_overwrite_config; then
 
   echo "[entrypoint] syncing LLM config from environment"
   update_llm_config_in_place
+  ensure_startup_config_is_valid "post-update"
   case "$(printf '%s' "$LLM_PROVIDER" | tr '[:upper:]' '[:lower:]')" in
     openrouter|openai|anthropic|custom)
     CONFIG_STATUS_MESSAGE="✅ Existing configuration preserved; LLM fields updated at $CONFIG_FILE"
@@ -345,6 +436,7 @@ EOF
   # 修复 OpenClaw 要求的安全权限
   chmod 600 "$CONFIG_FILE" 
   chmod 700 "$CONFIG_DIR"
+  ensure_startup_config_is_valid "post-generate"
 
   # Keep wrapper/gateway token consistent with the generated config.
   export OPENCLAW_GATEWAY_TOKEN="$FINAL_GATEWAY_TOKEN"
