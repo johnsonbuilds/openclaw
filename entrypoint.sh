@@ -11,6 +11,8 @@ CONFIG_FILE="$OPENCLAW_CONFIG_PATH"
 CONFIG_DIR=$(dirname "$CONFIG_FILE")
 INTERNAL_GATEWAY_PORT=${INTERNAL_GATEWAY_PORT:-18789}
 ENTRYPOINT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+OPENCLAW_ENTRY=${OPENCLAW_ENTRY:-/openclaw/dist/entry.js}
+OPENCLAW_DIST_DIR=$(dirname "$OPENCLAW_ENTRY")
 
 # Always bind the gateway to loopback so it is never directly exposed on the network.
 # External access should go through the wrapper (reverse proxy) only.
@@ -98,15 +100,15 @@ resolve_gateway_token_source() {
 }
 
 validate_openclaw_config_file() {
-  node --input-type=module - "$1" "$ENTRYPOINT_DIR" <<'EOF'
+  node --input-type=module - "$1" "$OPENCLAW_DIST_DIR" <<'EOF'
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-const [configPath, entrypointDir] = process.argv.slice(2);
+const [configPath, openclawDistDir] = process.argv.slice(2);
 process.env.OPENCLAW_CONFIG_PATH = configPath;
 
 try {
-  const moduleUrl = pathToFileURL(path.join(entrypointDir, "dist/plugin-sdk/config-runtime.js")).href;
+  const moduleUrl = pathToFileURL(path.join(openclawDistDir, "plugin-sdk/config-runtime.js")).href;
   const { readConfigFileSnapshotForWrite } = await import(moduleUrl);
   const { snapshot } = await readConfigFileSnapshotForWrite();
   if (snapshot.exists && snapshot.valid) {
@@ -447,7 +449,7 @@ fi
 export OPENCLAW_CONFIG_PATH="$CONFIG_FILE"
 export OPENCLAW_STATE_DIR
 export OPENCLAW_WORKSPACE_DIR
-export OPENCLAW_ENTRY="/openclaw/dist/entry.js"
+export OPENCLAW_ENTRY
 
 echo "$CONFIG_STATUS_MESSAGE"
 echo "🚀 Starting Wrapper Server (server.js)..."
