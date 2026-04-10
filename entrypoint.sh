@@ -271,16 +271,6 @@ else
   # 3. 动态生成 JSON
   cat <<EOF > "$CONFIG_FILE"
 {
-  "meta": {
-    "lastTouchedVersion": "2026.1.30",
-    "lastTouchedAt": "2026-02-01T15:29:19Z"
-  },
-  "wizard": {
-    "lastRunAt": "2026-02-01T15:29:19Z",
-    "lastRunVersion": "2026.1.30",
-    "lastRunCommand": "onboard",
-    "lastRunMode": "local"
-  },
   "models": {
     "providers": {
       "$LLM_PROVIDER": {
