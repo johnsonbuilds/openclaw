@@ -94,6 +94,7 @@
   - gateway 改为由 wrapper 托管启动、停止、重启。
   - 支持 `AGENT_GATEWAY_READY_NOTIFY_URL` ready 通知。
   - 支持 websocket 代理。
+  - wrapper 托管启动的 gateway 进程默认注入 `OPENCLAW_NO_RESPAWN=1`，使 `SIGUSR1` / 配置变更 / `openclaw gateway restart` 等正常重启优先走同进程重启，避免 fresh PID 重启时的端口抢占窗口误触发整容器重启。
 
 ### 5. `extensions/telegram/src/polling-conflict-alert.ts`
 

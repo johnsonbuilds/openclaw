@@ -95,6 +95,22 @@ const GATEWAY_TARGET = `http://${INTERNAL_GATEWAY_HOST}:${INTERNAL_GATEWAY_PORT}
 // External access goes through this wrapper (reverse proxy) only.
 const GATEWAY_BIND = "loopback";
 
+function isTruthyEnv(value) {
+  return /^(1|true|yes|on)$/i.test(String(value ?? "").trim());
+}
+
+function resolveRestartContainerOnGatewayExit() {
+  const raw =
+    process.env.OPENCLAW_RESTART_CONTAINER_ON_GATEWAY_EXIT ??
+    process.env.CLAWDBOT_RESTART_CONTAINER_ON_GATEWAY_EXIT;
+  if (raw == null || String(raw).trim() === "") {
+    return true;
+  }
+  return isTruthyEnv(raw);
+}
+
+const RESTART_CONTAINER_ON_GATEWAY_EXIT = resolveRestartContainerOnGatewayExit();
+
 // Always run the built-from-source CLI entry directly to avoid PATH/global-install mismatches.
 const OPENCLAW_ENTRY = process.env.OPENCLAW_ENTRY?.trim() || "/openclaw/dist/entry.js";
 const OPENCLAW_NODE = process.env.OPENCLAW_NODE?.trim() || "node";
@@ -121,6 +137,7 @@ function isConfigured() {
 
 let gatewayProc = null;
 let gatewayStarting = null;
+let expectedGatewayExit = false;
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
@@ -180,6 +197,7 @@ async function startGateway() {
     stdio: "inherit",
     env: {
       ...process.env,
+      OPENCLAW_NO_RESPAWN: process.env.OPENCLAW_NO_RESPAWN || "1",
       OPENCLAW_STATE_DIR: STATE_DIR,
       OPENCLAW_WORKSPACE_DIR: WORKSPACE_DIR,
       // Backward-compat aliases
@@ -194,8 +212,17 @@ async function startGateway() {
   });
 
   gatewayProc.on("exit", (code, signal) => {
+    const wasExpected = expectedGatewayExit;
+    expectedGatewayExit = false;
     console.error(`[gateway] exited code=${code} signal=${signal}`);
     gatewayProc = null;
+
+    if (!wasExpected && RESTART_CONTAINER_ON_GATEWAY_EXIT) {
+      console.error(
+        "[wrapper] gateway exited unexpectedly; exiting wrapper with code 1 so the container can restart",
+      );
+      process.exit(1);
+    }
   });
 }
 
@@ -223,6 +250,7 @@ async function ensureGatewayRunning() {
 
 async function restartGateway() {
   if (gatewayProc) {
+    expectedGatewayExit = true;
     try {
       gatewayProc.kill("SIGTERM");
     } catch {
@@ -370,6 +398,7 @@ app.post("/setup/api/console/run", requireSetupAuth, async (req, res) => {
     }
     if (cmd === "gateway.stop") {
       if (gatewayProc) {
+        expectedGatewayExit = true;
         try {
           gatewayProc.kill("SIGTERM");
         } catch {}
@@ -483,7 +512,7 @@ const server = app.listen(PORT, "0.0.0.0", () => {
     ensureGatewayRunning()
       .then((result) => {
         console.log(`[wrapper] Gateway start result: ${JSON.stringify(result)}`);
-        if (result?.ok === true) {
+        if (result?.ok) {
           notifyGatewayReady(INTERNAL_GATEWAY_PORT);
         }
       })
@@ -513,6 +542,7 @@ process.on("SIGTERM", () => {
   // Best-effort shutdown
   try {
     if (gatewayProc) {
+      expectedGatewayExit = true;
       gatewayProc.kill("SIGTERM");
     }
   } catch {
