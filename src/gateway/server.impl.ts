@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "node:path";
 import { resolveAgentWorkspaceDir, resolveDefaultAgentId } from "../agents/agent-scope.js";
 import { getActiveEmbeddedRunCount } from "../agents/pi-embedded-runner/runs.js";
@@ -21,6 +22,7 @@ import {
   readConfigFileSnapshot,
   writeConfigFile,
 } from "../config/config.js";
+import { syncConfigBackupBaseline } from "../config/backup-baseline.js";
 import { formatConfigIssueLines } from "../config/issue-format.js";
 import { applyPluginAutoEnable } from "../config/plugin-auto-enable.js";
 import { resolveMainSessionKey } from "../config/sessions.js";
@@ -1497,6 +1499,12 @@ export async function startGatewayServer(
             initialConfig: cfgAtStart,
             initialInternalWriteHash: startupInternalWriteHash,
             readSnapshot: readConfigFileSnapshot,
+            onValidatedExternalSnapshot: async (snapshot) => {
+              if (!snapshot.exists || !snapshot.valid || typeof snapshot.raw !== "string") {
+                return;
+              }
+              await syncConfigBackupBaseline(snapshot.path, fs.promises, snapshot.raw);
+            },
             subscribeToWrites: registerConfigWriteListener,
             onHotReload: async (plan, nextConfig) => {
               const previousSnapshot = getActiveSecretsRuntimeSnapshot();

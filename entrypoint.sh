@@ -136,6 +136,20 @@ try {
 EOF
 }
 
+refresh_config_backup_baseline() {
+  if [ ! -f "$CONFIG_FILE" ]; then
+    return 0
+  fi
+
+  backup_file="${CONFIG_FILE}.bak"
+  if cp "$CONFIG_FILE" "$backup_file"; then
+    chmod 600 "$backup_file" 2>/dev/null || true
+    return 0
+  fi
+
+  echo "[entrypoint] config recovery: status=backup-refresh-failed path=$backup_file" >&2
+}
+
 ensure_startup_config_is_valid() {
   validation_stage="$1"
 
@@ -144,6 +158,7 @@ ensure_startup_config_is_valid() {
   fi
 
   if validation_error=$(validate_openclaw_config_file "$CONFIG_FILE" 2>&1); then
+    refresh_config_backup_baseline
     return 0
   fi
 
@@ -184,6 +199,8 @@ ensure_startup_config_is_valid() {
   if [ -f "$invalid_snapshot" ]; then
     echo "[entrypoint] config recovery: invalid-snapshot=$invalid_snapshot" >&2
   fi
+
+  refresh_config_backup_baseline
 }
 
 require_llm_env() {

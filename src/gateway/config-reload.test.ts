@@ -363,7 +363,10 @@ function makeSnapshot(partial: Partial<ConfigFileSnapshot> = {}): ConfigFileSnap
 
 function createReloaderHarness(
   readSnapshot: () => Promise<ConfigFileSnapshot>,
-  options: { initialInternalWriteHash?: string | null } = {},
+  options: {
+    initialInternalWriteHash?: string | null;
+    onValidatedExternalSnapshot?: (snapshot: ConfigFileSnapshot) => Promise<void> | void;
+  } = {},
 ) {
   const watcher = createWatcherMock();
   vi.spyOn(chokidar, "watch").mockReturnValue(watcher as unknown as never);
@@ -387,6 +390,7 @@ function createReloaderHarness(
     initialConfig: { gateway: { reload: { debounceMs: 0 } } },
     initialInternalWriteHash: options.initialInternalWriteHash,
     readSnapshot,
+    onValidatedExternalSnapshot: options.onValidatedExternalSnapshot,
     subscribeToWrites,
     onHotReload,
     onRestart,
@@ -439,6 +443,57 @@ describe("startGatewayConfigReloader", () => {
     expect(onRestart).not.toHaveBeenCalled();
     expect(log.info).toHaveBeenCalledWith("config reload retry (1/2): config file not found");
     expect(log.warn).not.toHaveBeenCalledWith("config reload skipped (config file not found)");
+
+    await reloader.stop();
+  });
+
+  it("refreshes backup baseline for validated external config file changes", async () => {
+    const readSnapshot = vi.fn<() => Promise<ConfigFileSnapshot>>().mockResolvedValue(
+      makeSnapshot({
+        hash: "external-1",
+        raw: '{"tools":{}}',
+        config: {
+          gateway: { reload: { debounceMs: 0 } },
+          tools: {},
+        },
+      }),
+    );
+    const onValidatedExternalSnapshot = vi.fn();
+    const { watcher, onHotReload, reloader } = createReloaderHarness(readSnapshot, {
+      onValidatedExternalSnapshot,
+    });
+
+    watcher.emit("change");
+    await vi.runOnlyPendingTimersAsync();
+
+    expect(onValidatedExternalSnapshot).toHaveBeenCalledTimes(1);
+    expect(onHotReload).toHaveBeenCalledTimes(1);
+
+    await reloader.stop();
+  });
+
+  it("does not refresh backup baseline for internal config writes", async () => {
+    const readSnapshot = vi.fn<() => Promise<ConfigFileSnapshot>>();
+    const onValidatedExternalSnapshot = vi.fn();
+    const { onHotReload, reloader, emitWrite } = createReloaderHarness(readSnapshot, {
+      onValidatedExternalSnapshot,
+    });
+
+    emitWrite({
+      configPath: "/tmp/openclaw.json",
+      sourceConfig: {},
+      runtimeConfig: {
+        gateway: { reload: { debounceMs: 0 } },
+        tools: {},
+      },
+      persistedHash: "internal-1",
+      writtenAtMs: Date.now(),
+    });
+    await vi.runOnlyPendingTimersAsync();
+
+    expect(onValidatedExternalSnapshot).not.toHaveBeenCalled();
+    expect(onHotReload).toHaveBeenCalledTimes(1);
+    expect(readSnapshot).not.toHaveBeenCalled();
 
     await reloader.stop();
   });

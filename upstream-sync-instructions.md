@@ -104,6 +104,15 @@
   - 使用独立 helper 封装告警文案、发送逻辑和冷却窗口，减少对 upstream 主 polling 逻辑的侵入。
   - 同一 owner 默认带 15 分钟冷却，避免冲突持续期间反复刷屏。
 
+### 6. `src/config/backup-baseline.ts`
+
+- 差异摘要：新增一个独立的配置备份基线同步 helper，用于把“当前已验证有效”的 `openclaw.json` 同步到 `.bak`。
+- 修改目的：让恢复机制不仅覆盖受控配置写入，也覆盖 bot 或外部流程直接编辑配置文件的场景，同时把逻辑尽量隔离在单独模块中，降低后续同步 upstream 的冲突面。
+- 涉及功能 / 行为变化：
+  - 当调用方已经确认当前配置有效时，可将其复制为 `${configPath}.bak`。
+  - 若 `.bak` 内容与当前配置一致，则不会重复写入。
+  - 仅负责刷新“最近一次有效配置”的恢复基线，不替代既有的 `.bak/.bak.1...` 轮转逻辑。
+
 ### 修改文件
 
 ### 1. `Dockerfile`
@@ -322,3 +331,37 @@
   - 文档不再描述“先进行一轮身份问答”。
   - 改为说明首次启动先用简短 task-first 提示让用户直接提需求。
   - 身份与偏好信息采集改为在后续有用时再写入 `IDENTITY.md`、`USER.md`、`SOUL.md`。
+
+### 27. `src/config/io.ts`
+
+- 差异摘要：补充导入 `sanitizeTerminalText`，修复配置 warning 格式化路径中的运行时 `ReferenceError`。
+- 修改目的：修复 upstream 当前实现中的缺失导入问题，避免当配置包含 warning（例如禁用插件仍保留配置项）时，gateway 在 reload / restart / CLI 启动阶段因为打印 warning 而崩溃。
+- 涉及功能 / 行为变化：
+  - 当配置校验返回 warnings 时，可以稳定输出 `Config warnings` 日志，不再因 `sanitizeTerminalText is not defined` 失败。
+  - bot 或其他外部流程修改配置后，若触发 gateway reload 且配置仅包含 warning，不会再把 warning 误升级为致命启动错误。
+  - 该修复属于 fork 需要保留的上游 bugfix，同步 upstream 时若冲突应保留其语义，除非 upstream 已以等效方式修复。
+
+### 28. `entrypoint.sh`
+
+- 差异摘要：在现有启动校验与恢复逻辑基础上，新增“成功验证后刷新 `.bak` 基线”的行为。
+- 修改目的：保证容器每次成功启动或恢复后，`${OPENCLAW_CONFIG_PATH}.bak` 都指向最近一次已验证有效的配置，即使此前配置曾被外部直接改写。
+- 涉及功能 / 行为变化：
+  - 当 `ensure_startup_config_is_valid()` 确认当前配置有效时，会将当前 `openclaw.json` 刷新到 `.bak`。
+  - 当入口脚本从 `.bak` 恢复成功后，会再次刷新 `.bak`，确保恢复基线与当前有效配置一致。
+  - 该逻辑是恢复机制的补强层，不改变已有 `overwrite-defaults` / `update-llm-only` 主流程。
+
+### 29. `src/gateway/config-reload.ts`
+
+- 差异摘要：gateway 配置热重载器新增一个可选回调，仅在“外部文件变更且快照校验有效”时执行附加动作。
+- 修改目的：把“外部有效配置变更后刷新 `.bak`”的行为隔离成可注入回调，减少直接侵入 reload 核心流程，降低后续同步冲突。
+- 涉及功能 / 行为变化：
+  - 对受控内部写入通知维持原行为，不额外刷新 `.bak`，避免破坏既有备份轮转语义。
+  - 对 watcher 检测到的外部文件变更，在确认配置有效后可执行备份基线刷新。
+
+### 30. `src/gateway/server.impl.ts`
+
+- 差异摘要：gateway 启动时为配置热重载器注入“外部有效配置变更后刷新 `.bak`”的回调。
+- 修改目的：让 bot 或其他外部流程直接编辑 `/data/openclaw.json` 后，只要配置仍然有效，就能自动建立新的恢复基线。
+- 涉及功能 / 行为变化：
+  - 当 watcher 检测到有效的外部配置变更时，会把当前 `openclaw.json` 同步到 `.bak`。
+  - 对内部受控写入不触发该同步，继续保留 upstream / 现有 fork 的备份轮转行为。

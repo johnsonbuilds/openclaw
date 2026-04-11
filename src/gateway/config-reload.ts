@@ -80,6 +80,7 @@ export function startGatewayConfigReloader(opts: {
   readSnapshot: () => Promise<ConfigFileSnapshot>;
   onHotReload: (plan: GatewayReloadPlan, nextConfig: OpenClawConfig) => Promise<void>;
   onRestart: (plan: GatewayReloadPlan, nextConfig: OpenClawConfig) => void | Promise<void>;
+  onValidatedExternalSnapshot?: (snapshot: ConfigFileSnapshot) => Promise<void> | void;
   subscribeToWrites?: (listener: (event: ConfigWriteNotification) => void) => () => void;
   log: {
     info: (msg: string) => void;
@@ -223,6 +224,11 @@ export function startGatewayConfigReloader(opts: {
       }
       if (handleInvalidSnapshot(snapshot)) {
         return;
+      }
+      try {
+        await opts.onValidatedExternalSnapshot?.(snapshot);
+      } catch (err) {
+        opts.log.warn(`config backup baseline refresh skipped: ${String(err)}`);
       }
       await applySnapshot(snapshot.config);
     } catch (err) {
