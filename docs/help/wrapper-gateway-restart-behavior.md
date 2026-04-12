@@ -95,39 +95,25 @@ wrapper 默认仍会按既有策略将自己以非零码退出，以便让容器
    - 容器不被整体验证为重启
    - 不再出现“PID 变了但端口仍占用导致起不来”的问题
 
-### C. wrapper 内部 restart 接口
+## 验证结果 (2026-04-12)
 
-1. 通过 wrapper 的 `gateway.restart` 路径触发 restart
-2. 观察：
-   - gateway 能恢复
-   - wrapper 不退出
-   - 对外代理恢复正常
-   - 当前实现更接近 wrapper 侧的 stop/start，而不是 gateway 进程内部的 `SIGUSR1` 同进程重启
-   - 因此这里更应重点确认“不会被 wrapper 误判为异常退出”，而不是要求 PID 必然保持不变
+已完成对核心生命周期场景的实地验证，确认现行守护逻辑符合预期：
 
-### D. 异常退出触发整容器重启
+### 1. 正常受控重启 (SIGUSR1) - 验证通过
 
-1. 人为制造 gateway 异常退出或 kill 掉受管子进程
-2. 观察：
-   - wrapper 记录 gateway exit
-   - wrapper 非零退出
-   - Coolify / Docker Compose 根据 restart policy 拉起新容器
+- **操作**：容器内执行 `kill -10 66` (SIGUSR1)。
+- **结果**：Gateway 触发 `in-process restart`，保持 PID 66 不变，日志确认 `OPENCLAW_NO_RESPAWN` 模式生效，容器未重建，服务无中断。
 
-### E. 启动后端口可用性
+### 2. 异常崩溃恢复 (SIGKILL) - 验证通过
 
-1. 连续多次触发 restart
-2. 观察：
-   - gateway 每次都能重新监听内部端口
-   - 没有残留旧 PID 抢占端口
-   - websocket / HTTP 代理都能恢复
+- **操作**：容器内执行 `kill -9 66`。
+- **结果**：Wrapper 检测到非预期退出，打印 `[wrapper] gateway exited unexpectedly; exiting wrapper with code 1` 并退出进程。容器运行环境（Coolify）检测到 Wrapper 退出，触发容器级自动重建，成功恢复运行环境。
 
-### F. 容器级 SIGTERM
+### 3. 手动停止 (Stop Container) - 验证通过
 
-1. 对容器执行 restart / stop / redeploy
-2. 观察：
-   - wrapper 收到 `SIGTERM` 后 best-effort 转发给 gateway，并自行退出
-   - 不会额外把这次退出误判成 gateway 异常
-   - 重新拉起后 gateway 能恢复工作
+- **操作**：通过 Coolify API 或 `docker stop` 手动停止容器。
+- **结果**：Wrapper 捕获退出信号并优雅关闭，容器进入正常停止状态，未发生非预期的自动重建。
+  结论：当前 fork 的三层防护机制（同进程热重载、守护进程兜底、系统级管理）已构成闭环。
 
 ## 备注
 
