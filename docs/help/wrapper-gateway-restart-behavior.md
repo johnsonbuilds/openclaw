@@ -57,7 +57,9 @@ wrapper 现在在拉起托管 gateway 子进程时，默认注入：
 - 未受 wrapper 标记保护的异常终止
 - 启动失败后最终退出
 
-wrapper 仍会按既有策略将自己以非零码退出，以便让容器运行时执行 restart。
+wrapper 默认仍会按既有策略将自己以非零码退出，以便让容器运行时执行 restart。
+
+需要注意：该行为默认受 `OPENCLAW_RESTART_CONTAINER_ON_GATEWAY_EXIT` 控制。默认配置下它是开启的；如果显式关闭，则 gateway 异常退出不会再自动放大为 wrapper 非零退出。
 
 ### 3. stop 语义
 
@@ -100,6 +102,8 @@ wrapper 仍会按既有策略将自己以非零码退出，以便让容器运行
    - gateway 能恢复
    - wrapper 不退出
    - 对外代理恢复正常
+   - 当前实现更接近 wrapper 侧的 stop/start，而不是 gateway 进程内部的 `SIGUSR1` 同进程重启
+   - 因此这里更应重点确认“不会被 wrapper 误判为异常退出”，而不是要求 PID 必然保持不变
 
 ### D. 异常退出触发整容器重启
 
@@ -121,7 +125,7 @@ wrapper 仍会按既有策略将自己以非零码退出，以便让容器运行
 
 1. 对容器执行 restart / stop / redeploy
 2. 观察：
-   - wrapper 收到 `SIGTERM` 后优雅退出
+   - wrapper 收到 `SIGTERM` 后 best-effort 转发给 gateway，并自行退出
    - 不会额外把这次退出误判成 gateway 异常
    - 重新拉起后 gateway 能恢复工作
 
