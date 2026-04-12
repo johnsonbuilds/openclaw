@@ -60,8 +60,13 @@ export function formatBillingErrorMessage(provider?: string, model?: string): st
 
 export const BILLING_ERROR_USER_MESSAGE = formatBillingErrorMessage();
 
-const RATE_LIMIT_ERROR_USER_MESSAGE =
-  "⚠️ AI usage limit reached — add or switch your API key to continue: https://getclawcloud.com/home?openByoKey=true";
+const RATE_LIMIT_ERROR_USER_MESSAGE = `⚠️ I’ve hit the free usage limit.
+
+You can keep me running by adding your API key:
+👉 https://getclawcloud.com/home?openByoKey=true
+
+Takes ~2 minutes, then I’m back 🚀`;
+
 const OVERLOADED_ERROR_USER_MESSAGE =
   "The AI service is temporarily overloaded. Please try again in a moment.";
 
