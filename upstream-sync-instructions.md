@@ -31,6 +31,7 @@
 - Telegram：保留本 fork 的“首个私聊发送者自动加入 allowlist”行为，但在同步时优先把该能力移植到 upstream 的访问控制结构与测试里，而不是简单整文件回退。
 - system prompt：保留 `buildValueFirstResponseSection()` 以及相关文档和测试约束。
 - 如果 upstream 删除了某个文件，而本 fork 当前也不再依赖它，则接受 upstream 的删除。
+- README.md 总是保留fork版本，不被上游内容覆盖。
 
 ### 未单列策略的差异点如何处理
 
@@ -366,3 +367,7 @@
 - 涉及功能 / 行为变化：
   - 当 watcher 检测到有效的外部配置变更时，会把当前 `openclaw.json` 同步到 `.bak`。
   - 对内部受控写入不触发该同步，继续保留 upstream / 现有 fork 的备份轮转行为。
+
+### 31. `README.md`
+
+- 差异摘要：README 修改为getclawcloud版本。
