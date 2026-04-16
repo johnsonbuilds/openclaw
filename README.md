@@ -40,8 +40,6 @@
 - Run scheduled workflows
 - Connect APIs and tools
 
-👉 **Try one instantly:** https://getclawcloud.com
-
 ---
 
 ## 🧭 Choose how you want to use OpenClaw
