@@ -34,12 +34,14 @@ const WORKSPACE_STATE_PATH_SEGMENTS = [".openclaw", "workspace-state.json"] as c
 async function readWorkspaceState(dir: string): Promise<{
   version: number;
   bootstrapSeededAt?: string;
+  bootstrapTemplateId?: string;
   setupCompletedAt?: string;
 }> {
   const raw = await fs.readFile(path.join(dir, ...WORKSPACE_STATE_PATH_SEGMENTS), "utf-8");
   return JSON.parse(raw) as {
     version: number;
     bootstrapSeededAt?: string;
+    bootstrapTemplateId?: string;
     setupCompletedAt?: string;
   };
 }
@@ -78,7 +80,47 @@ describe("ensureAgentWorkspace", () => {
     await ensureAgentWorkspace({ dir: tempDir, ensureBootstrapFiles: true });
 
     await expectBootstrapSeeded(tempDir);
-    expect((await readWorkspaceState(tempDir)).setupCompletedAt).toBeUndefined();
+    const state = await readWorkspaceState(tempDir);
+    expect(state.setupCompletedAt).toBeUndefined();
+    expect(state.bootstrapTemplateId).toBe("default");
+  });
+
+  it("uses TEMPLATE_TASK_ID bootstrap content for first seed only", async () => {
+    const tempDir = await makeTempWorkspace("openclaw-workspace-");
+    process.env.TEMPLATE_TASK_ID = "template_task_1";
+
+    try {
+      await ensureAgentWorkspace({ dir: tempDir, ensureBootstrapFiles: true });
+
+      const bootstrapContent = await fs.readFile(path.join(tempDir, DEFAULT_BOOTSTRAP_FILENAME), "utf-8");
+      expect(bootstrapContent).toContain("Find 5 startup founders on Twitter in the AI / SaaS space.");
+      expect((await readWorkspaceState(tempDir)).bootstrapTemplateId).toBe("template_task_1");
+
+      await fs.unlink(path.join(tempDir, DEFAULT_BOOTSTRAP_FILENAME));
+      await ensureAgentWorkspace({ dir: tempDir, ensureBootstrapFiles: true });
+
+      await expect(fs.access(path.join(tempDir, DEFAULT_BOOTSTRAP_FILENAME))).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+      expect((await readWorkspaceState(tempDir)).bootstrapTemplateId).toBe("template_task_1");
+    } finally {
+      delete process.env.TEMPLATE_TASK_ID;
+    }
+  });
+
+  it("falls back to default bootstrap template when TEMPLATE_TASK_ID template is missing", async () => {
+    const tempDir = await makeTempWorkspace("openclaw-workspace-");
+    process.env.TEMPLATE_TASK_ID = "missing_template";
+
+    try {
+      await ensureAgentWorkspace({ dir: tempDir, ensureBootstrapFiles: true });
+
+      const bootstrapContent = await fs.readFile(path.join(tempDir, DEFAULT_BOOTSTRAP_FILENAME), "utf-8");
+      expect(bootstrapContent).toContain("👉 What do you want me to do?");
+      expect((await readWorkspaceState(tempDir)).bootstrapTemplateId).toBe("default");
+    } finally {
+      delete process.env.TEMPLATE_TASK_ID;
+    }
   });
 
   it("recovers partial initialization by creating BOOTSTRAP.md when marker is missing", async () => {

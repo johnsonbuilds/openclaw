@@ -284,11 +284,14 @@
 
 ### 21. `src/agents/workspace.ts`
 
-- 差异摘要：默认 workspace 目录解析逻辑新增 `OPENCLAW_WORKSPACE_DIR` / `CLAWDBOT_WORKSPACE_DIR` 覆盖项。
-- 修改目的：让容器部署可以稳定指定 workspace 位置，不依赖 home 目录规则。
+- 差异摘要：默认 workspace 目录解析逻辑新增 `OPENCLAW_WORKSPACE_DIR` / `CLAWDBOT_WORKSPACE_DIR` 覆盖项；首启 bootstrap 改为支持通过 `TEMPLATE_TASK_ID` 选择模板来源，但实际仍只落地为一次性的 `BOOTSTRAP.md`。
+- 修改目的：让容器部署可以稳定指定 workspace 位置，不依赖 home 目录规则；同时为首次会话保留现有 `BOOTSTRAP.md` 状态机与一次性执行语义，并允许按环境变量切换默认任务模板。
 - 涉及功能 / 行为变化：
   - 若设置了显式 workspace 环境变量，则直接使用它。
   - 否则才回退到原先基于 `OPENCLAW_HOME` / `HOME` 的默认解析逻辑。
+  - 首次 seed `BOOTSTRAP.md` 时，会优先读取 `TEMPLATE_TASK_ID` 并尝试加载对应的 `docs/reference/templates/BOOTSTRAP.<id>.md`。
+  - 若未设置 `TEMPLATE_TASK_ID`，或对应模板不存在，则回退到默认 [`BOOTSTRAP.md`](docs/reference/templates/BOOTSTRAP.md)。
+  - workspace 状态文件新增可选 `bootstrapTemplateId` 记录首启时使用的模板来源，但是否重跑仍只由既有 `bootstrapSeededAt` / `setupCompletedAt` 语义决定。
 
 ### 22. `src/dockerfile.test.ts`
 
@@ -307,16 +310,52 @@
 
 ### 24. `docs/reference/templates/BOOTSTRAP.md`
 
-- 差异摘要：将首启 bootstrap 模板从 identity-first / persona-first 改为 task-first。
-- 修改目的：避免用户首次连上实例或首次通过 Telegram 等入口开始对话时，被冗长的人格配置问卷打断，优先让用户进入“任务态”。
+- 差异摘要：将首启 bootstrap 模板从 identity-first / persona-first 改为 task-first，并把它保留为 `TEMPLATE_TASK_ID` 未命中时的默认回退模板。
+- 修改目的：避免用户首次连上实例或首次通过 Telegram 等入口开始对话时，被冗长的人格配置问卷打断，优先让用户进入“任务态”；同时作为可选模板机制下的稳定默认值。
 - 涉及功能 / 行为变化：
   - 首句改为明确要求先问 `👉 What do you want me to do?`。
   - 增加少量任务示例（如 analyze a file / build an automation / set up a voice agent），帮助用户快速进入任务表达。
   - 明确要求：如果用户给了任务，就先做任务，不要先做身份设定。
   - `SOUL.md`、命名、vibe、emoji 等人格信息收集改为延后、可选、渐进式，不再作为首次对话前置门槛。
   - 删除 `BOOTSTRAP.md` 的条件放宽为“用户已进入正常任务对话”，而不是必须先完整做完人格配置。
+  - 当 `TEMPLATE_TASK_ID` 未设置或对应模板缺失时，首次会话仍继续使用这份默认模板。
 
-### 25. `apps/macos/Sources/OpenClaw/OnboardingView+Chat.swift`
+### 25. `src/agents/workspace.test.ts`
+
+- 差异摘要：为 bootstrap 模板选择逻辑新增定向测试。
+- 修改目的：防止后续同步 upstream 或重构 workspace 初始化时，误破坏 `TEMPLATE_TASK_ID` 模板选择、默认回退与只执行一次的既有行为。
+- 涉及功能 / 行为变化：
+  - 测试覆盖默认模板会记录 `bootstrapTemplateId: "default"`。
+  - 测试覆盖设置 `TEMPLATE_TASK_ID` 时，写入的 [`BOOTSTRAP.md`](docs/reference/templates/BOOTSTRAP.md) 内容来自对应模板。
+  - 测试覆盖 bootstrap 删除后不会因再次运行而重 seed，自定义模板也只执行一次。
+  - 测试覆盖模板不存在时会回退到默认 [`BOOTSTRAP.md`](docs/reference/templates/BOOTSTRAP.md)。
+
+### 26. `docs/reference/templates/BOOTSTRAP.template_task_1.md`
+
+- 差异摘要：新增首会话模板 `template_task_1`。
+- 修改目的：支持通过 `TEMPLATE_TASK_ID=template_task_1` 将首次 bootstrap 任务切换为“AI / SaaS founder outreach”。
+- 涉及功能 / 行为变化：
+  - 首次会话任务改为查找 5 位 AI / SaaS 创业者并生成个性化 outreach 文案。
+  - 保留强制追加 daily task CTA 文案的要求。
+
+### 27. `docs/reference/templates/BOOTSTRAP.template_task_2.md`
+
+- 差异摘要：新增首会话模板 `template_task_2`。
+- 修改目的：支持通过 `TEMPLATE_TASK_ID=template_task_2` 将首次 bootstrap 任务切换为“Hacker News 热门总结”。
+- 涉及功能 / 行为变化：
+  - 首次会话任务改为总结当天 5 条 Hacker News 热门内容，并提炼趋势与 builder insight。
+  - 保留强制追加 daily task CTA 文案的要求。
+
+### 28. `docs/reference/templates/BOOTSTRAP.template_task_3.md`
+
+- 差异摘要：新增首会话模板 `template_task_3`。
+- 修改目的：支持通过 `TEMPLATE_TASK_ID=template_task_3` 将首次 bootstrap 任务切换为“Singapore AI startups 调研 + CSV 上传”。
+- 涉及功能 / 行为变化：
+  - 首次会话任务改为整理 8 家新加坡 AI 公司、输出表格、生成 `ai_startups_singapore.csv` 并尝试上传返回下载链接。
+  - 上传失败时会按模板要求依次尝试两个上传端点，若都失败则报告错误。
+  - 保留强制追加 daily task CTA 文案的要求。
+
+### 29. `apps/macos/Sources/OpenClaw/OnboardingView+Chat.swift`
 
 - 差异摘要：macOS onboarding chat 的 kickoff 文案改为显式要求 task-first bootstrap。
 - 修改目的：让应用侧自动发出的首条引导消息与 fork 的 task-first bootstrap 语义保持一致，避免仍旧把用户导向先配置 `SOUL.md` / persona。
@@ -325,7 +364,7 @@
   - 改为明确提示 agent 按 `BOOTSTRAP.md` 进入 task-first 模式。
   - 明确给出首句和示例方向，要求先帮助用户完成任务，再在需要时补做 identity / `SOUL.md` 个性化。
 
-### 26. `docs/start/bootstrapping.md`
+### 30. `docs/start/bootstrapping.md`
 
 - 差异摘要：启动文档同步更新为 task-first bootstrap 描述。
 - 修改目的：让文档对首次启动体验的描述与 fork 的实际行为一致，避免保留 upstream 或旧版本的人格优先叙述。
@@ -334,7 +373,7 @@
   - 改为说明首次启动先用简短 task-first 提示让用户直接提需求。
   - 身份与偏好信息采集改为在后续有用时再写入 `IDENTITY.md`、`USER.md`、`SOUL.md`。
 
-### 27. `src/config/io.ts`
+### 31. `src/config/io.ts`
 
 - 差异摘要：补充导入 `sanitizeTerminalText`，修复配置 warning 格式化路径中的运行时 `ReferenceError`。
 - 修改目的：修复 upstream 当前实现中的缺失导入问题，避免当配置包含 warning（例如禁用插件仍保留配置项）时，gateway 在 reload / restart / CLI 启动阶段因为打印 warning 而崩溃。
@@ -343,7 +382,7 @@
   - bot 或其他外部流程修改配置后，若触发 gateway reload 且配置仅包含 warning，不会再把 warning 误升级为致命启动错误。
   - 该修复属于 fork 需要保留的上游 bugfix，同步 upstream 时若冲突应保留其语义，除非 upstream 已以等效方式修复。
 
-### 28. `entrypoint.sh`
+### 32. `entrypoint.sh`
 
 - 差异摘要：在现有启动校验与恢复逻辑基础上，新增“成功验证后刷新 `.bak` 基线”的行为。
 - 修改目的：保证容器每次成功启动或恢复后，`${OPENCLAW_CONFIG_PATH}.bak` 都指向最近一次已验证有效的配置，即使此前配置曾被外部直接改写。
@@ -352,7 +391,7 @@
   - 当入口脚本从 `.bak` 恢复成功后，会再次刷新 `.bak`，确保恢复基线与当前有效配置一致。
   - 该逻辑是恢复机制的补强层，不改变已有 `overwrite-defaults` / `update-llm-only` 主流程。
 
-### 29. `src/gateway/config-reload.ts`
+### 33. `src/gateway/config-reload.ts`
 
 - 差异摘要：gateway 配置热重载器新增一个可选回调，仅在“外部文件变更且快照校验有效”时执行附加动作。
 - 修改目的：把“外部有效配置变更后刷新 `.bak`”的行为隔离成可注入回调，减少直接侵入 reload 核心流程，降低后续同步冲突。
@@ -360,7 +399,7 @@
   - 对受控内部写入通知维持原行为，不额外刷新 `.bak`，避免破坏既有备份轮转语义。
   - 对 watcher 检测到的外部文件变更，在确认配置有效后可执行备份基线刷新。
 
-### 30. `src/gateway/server.impl.ts`
+### 34. `src/gateway/server.impl.ts`
 
 - 差异摘要：gateway 启动时为配置热重载器注入“外部有效配置变更后刷新 `.bak`”的回调。
 - 修改目的：让 bot 或其他外部流程直接编辑 `/data/openclaw.json` 后，只要配置仍然有效，就能自动建立新的恢复基线。

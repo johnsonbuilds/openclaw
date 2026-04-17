@@ -10,6 +10,8 @@ import { readStringValue } from "../shared/string-coerce.js";
 import { resolveUserPath } from "../utils.js";
 import { resolveWorkspaceTemplateDir } from "./workspace-templates.js";
 
+const TEMPLATE_TASK_ID_ENV_NAME = "TEMPLATE_TASK_ID";
+
 export function resolveDefaultAgentWorkspaceDir(
   env: NodeJS.ProcessEnv = process.env,
   homedir: () => string = os.homedir,
@@ -136,6 +138,43 @@ async function loadTemplate(name: string): Promise<string> {
   }
 }
 
+function resolveBootstrapTemplateFileName(templateTaskId: string): string {
+  return `${DEFAULT_BOOTSTRAP_FILENAME.replace(/\.md$/u, "")}.${templateTaskId}.md`;
+}
+
+function readBootstrapTemplateTaskId(env: NodeJS.ProcessEnv = process.env): string | null {
+  const value = env[TEMPLATE_TASK_ID_ENV_NAME];
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+async function loadBootstrapTemplateForEnv(
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<{ content: string; templateId: string }> {
+  const templateTaskId = readBootstrapTemplateTaskId(env);
+  if (!templateTaskId) {
+    return {
+      content: await loadTemplate(DEFAULT_BOOTSTRAP_FILENAME),
+      templateId: "default",
+    };
+  }
+
+  try {
+    return {
+      content: await loadTemplate(resolveBootstrapTemplateFileName(templateTaskId)),
+      templateId: templateTaskId,
+    };
+  } catch {
+    return {
+      content: await loadTemplate(DEFAULT_BOOTSTRAP_FILENAME),
+      templateId: "default",
+    };
+  }
+}
+
 export type WorkspaceBootstrapFileName =
   | typeof DEFAULT_AGENTS_FILENAME
   | typeof DEFAULT_SOUL_FILENAME
@@ -169,6 +208,7 @@ export type ExtraBootstrapLoadDiagnostic = {
 type WorkspaceSetupState = {
   version: typeof WORKSPACE_STATE_VERSION;
   bootstrapSeededAt?: string;
+  bootstrapTemplateId?: string;
   setupCompletedAt?: string;
 };
 
@@ -218,6 +258,7 @@ function parseWorkspaceSetupState(raw: string): WorkspaceSetupState | null {
   try {
     const parsed = JSON.parse(raw) as {
       bootstrapSeededAt?: unknown;
+      bootstrapTemplateId?: unknown;
       setupCompletedAt?: unknown;
       onboardingCompletedAt?: unknown;
     };
@@ -228,6 +269,7 @@ function parseWorkspaceSetupState(raw: string): WorkspaceSetupState | null {
     return {
       version: WORKSPACE_STATE_VERSION,
       bootstrapSeededAt: readStringValue(parsed.bootstrapSeededAt),
+      bootstrapTemplateId: readStringValue(parsed.bootstrapTemplateId),
       setupCompletedAt: readStringValue(parsed.setupCompletedAt) ?? legacyCompletedAt,
     };
   } catch {
@@ -438,15 +480,18 @@ export async function ensureAgentWorkspace(params?: {
     if (legacySetupCompleted) {
       markState({ setupCompletedAt: nowIso() });
     } else {
-      const bootstrapTemplate = await loadTemplate(DEFAULT_BOOTSTRAP_FILENAME);
-      const wroteBootstrap = await writeFileIfMissing(bootstrapPath, bootstrapTemplate);
+      const bootstrapTemplate = await loadBootstrapTemplateForEnv();
+      const wroteBootstrap = await writeFileIfMissing(bootstrapPath, bootstrapTemplate.content);
       if (!wroteBootstrap) {
         bootstrapExists = await fileExists(bootstrapPath);
       } else {
         bootstrapExists = true;
       }
       if (bootstrapExists && !state.bootstrapSeededAt) {
-        markState({ bootstrapSeededAt: nowIso() });
+        markState({
+          bootstrapSeededAt: nowIso(),
+          bootstrapTemplateId: bootstrapTemplate.templateId,
+        });
       }
     }
   }
