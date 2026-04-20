@@ -51,6 +51,7 @@ const BASE_RELOAD_RULES: ReloadRule[] = [
   },
   // Stuck-session warning threshold is read by the diagnostics heartbeat loop.
   { prefix: "diagnostics.stuckSessionWarnMs", kind: "none" },
+  { prefix: "commands.ownerAllowFrom", kind: "none" },
   { prefix: "hooks.gmail", kind: "hot", actions: ["restart-gmail-watcher"] },
   { prefix: "hooks", kind: "hot", actions: ["reload-hooks"] },
   {
