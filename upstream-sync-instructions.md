@@ -378,6 +378,15 @@
   - 改为说明首次启动先用简短 task-first 提示让用户直接提需求。
   - 身份与偏好信息采集改为在后续有用时再写入 `IDENTITY.md`、`USER.md`、`SOUL.md`。
 
+### 31. `src/gateway/config-reload-plan.ts`
+
+- 差异摘要：为 `commands.ownerAllowFrom` 新增更具体的 reload 规则，避免其命中更泛化的 `commands` restart 路径。
+- 修改目的：配合 Telegram “首个私聊发送者自动成为 owner” 的 fork 行为，避免自动写入 `commands.ownerAllowFrom` 时触发整个 gateway SIGUSR1 重启，打断进行中的 bootstrap / 首任务流程。
+- 涉及功能 / 行为变化：
+  - `commands.ownerAllowFrom` 变更现在按 `kind: "none"` 处理。
+  - 后续消息仍会基于最新配置动态读取 owner allowlist 生效。
+  - 不再因为 owner allowlist 自动写入而触发 gateway restart。
+
 ### 31. `src/config/io.ts`
 
 - 差异摘要：补充导入 `sanitizeTerminalText`，修复配置 warning 格式化路径中的运行时 `ReferenceError`。
