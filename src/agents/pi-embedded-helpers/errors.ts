@@ -65,7 +65,7 @@ const RATE_LIMIT_ERROR_USER_MESSAGE = `⚠️ I’ve hit the free usage limit.
 You can keep me running by adding your API key:
 👉 https://getclawcloud.com/home?openByoKey=true
 
-Takes ~2 minutes, then I’m back 🚀`;
+Takes ~1 minutes, then I’m back 🚀`;
 
 const OVERLOADED_ERROR_USER_MESSAGE =
   "The AI service is temporarily overloaded. Please try again in a moment.";

@@ -5,7 +5,12 @@ import {
   upsertChannelPairingRequest,
 } from "openclaw/plugin-sdk/conversation-runtime";
 import { createChannelPairingChallengeIssuer } from "openclaw/plugin-sdk/channel-pairing";
-import type { DmPolicy } from "openclaw/plugin-sdk/config-runtime";
+import {
+  readConfigFileSnapshotForWrite,
+  type DmPolicy,
+  type OpenClawConfig,
+  writeConfigFile,
+} from "openclaw/plugin-sdk/config-runtime";
 import { logVerbose } from "openclaw/plugin-sdk/runtime-env";
 import { withTelegramApiErrorLogging } from "./api-logging.js";
 import { resolveSenderAllowMatch, type NormalizedAllowFrom } from "./bot-access.js";
@@ -33,6 +38,48 @@ function resolveTelegramSenderIdentity(msg: Message, chatId: number): TelegramSe
     firstName: from?.first_name,
     lastName: from?.last_name,
   };
+}
+
+function appendTelegramOwnerAllowFrom(config: OpenClawConfig, ownerEntry: string): OpenClawConfig {
+  const current = Array.isArray(config.commands?.ownerAllowFrom) ? config.commands.ownerAllowFrom : [];
+  const normalized = current
+    .map((entry) => String(entry ?? "").trim())
+    .filter((entry) => entry.length > 0);
+  if (normalized.includes(ownerEntry)) {
+    return config;
+  }
+  return {
+    ...config,
+    commands: {
+      ...(config.commands ?? {}),
+      ownerAllowFrom: [...normalized, ownerEntry],
+    },
+  } satisfies OpenClawConfig;
+}
+
+async function ensureTelegramFirstDmSenderIsOwner(params: {
+  telegramUserId: string;
+  logger: TelegramDmAccessLogger;
+  chatId: number;
+  username: string;
+}): Promise<void> {
+  const ownerEntry = `telegram:${params.telegramUserId}`;
+  const { snapshot, writeOptions } = await readConfigFileSnapshotForWrite();
+  const config = (snapshot.valid ? snapshot.config : {}) as OpenClawConfig;
+  const nextConfig = appendTelegramOwnerAllowFrom(config, ownerEntry);
+  if (nextConfig === config) {
+    return;
+  }
+  await writeConfigFile(nextConfig, writeOptions);
+  params.logger.info(
+    {
+      chatId: String(params.chatId),
+      senderUserId: params.telegramUserId,
+      username: params.username || undefined,
+      ownerAllowFromEntry: ownerEntry,
+    },
+    "telegram auto-added first dm sender to commands.ownerAllowFrom",
+  );
 }
 
 export async function enforceTelegramDmAccess(params: {
@@ -91,6 +138,12 @@ export async function enforceTelegramDmAccess(params: {
         channel: "telegram",
         entry: telegramUserId,
         accountId,
+      });
+      await ensureTelegramFirstDmSenderIsOwner({
+        telegramUserId,
+        logger,
+        chatId,
+        username: sender.username,
       });
       logger.info(
         {

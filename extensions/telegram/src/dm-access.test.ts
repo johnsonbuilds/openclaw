@@ -31,11 +31,26 @@ vi.mock("openclaw/plugin-sdk/conversation-runtime", () => ({
   resolvePinnedMainDmOwnerFromAllowlist: () => undefined,
 }));
 
+const readConfigFileSnapshotForWriteMock = vi.hoisted(() => vi.fn());
+const writeConfigFileMock = vi.hoisted(() => vi.fn(async () => undefined));
+
+vi.mock("openclaw/plugin-sdk/config-runtime", async () => {
+  const actual = await vi.importActual<typeof import("openclaw/plugin-sdk/config-runtime")>(
+    "openclaw/plugin-sdk/config-runtime",
+  );
+  return {
+    ...actual,
+    readConfigFileSnapshotForWrite: readConfigFileSnapshotForWriteMock,
+    writeConfigFile: writeConfigFileMock,
+  };
+});
+
 vi.mock("./api-logging.js", () => ({
   withTelegramApiErrorLogging: withTelegramApiErrorLoggingMock,
 }));
 
 import type { Message } from "@grammyjs/types";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/config-runtime";
 import { normalizeAllowFrom } from "./bot-access.js";
 let enforceTelegramDmAccess: typeof import("./dm-access.js").enforceTelegramDmAccess;
 
@@ -62,6 +77,11 @@ describe("enforceTelegramDmAccess", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    readConfigFileSnapshotForWriteMock.mockResolvedValue({
+      snapshot: { valid: true, config: {} as OpenClawConfig },
+      writeOptions: {},
+    });
+    writeConfigFileMock.mockResolvedValue(undefined);
   });
 
   it("allows DMs when policy is open", async () => {
@@ -138,8 +158,40 @@ describe("enforceTelegramDmAccess", () => {
       entry: "12345",
       accountId: "main",
     });
+    expect(writeConfigFileMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        commands: expect.objectContaining({ ownerAllowFrom: ["telegram:12345"] }),
+      }),
+      {},
+    );
     expect(createChannelPairingChallengeIssuerMock).not.toHaveBeenCalled();
     expect(sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("does not duplicate commands.ownerAllowFrom when first sender is already owner", async () => {
+    readConfigFileSnapshotForWriteMock.mockResolvedValue({
+      snapshot: {
+        valid: true,
+        config: { commands: { ownerAllowFrom: ["telegram:12345"] } } as OpenClawConfig,
+      },
+      writeOptions: {},
+    });
+
+    const allowed = await enforceTelegramDmAccess({
+      isGroup: false,
+      dmPolicy: "pairing",
+      msg: createDmMessage(),
+      chatId: 42,
+      effectiveDmAllow: normalizeAllowFrom([]),
+      accountId: "main",
+      bot: { api: { sendMessage: vi.fn(async () => undefined) } } as never,
+      logger: { info: vi.fn() },
+      addAllowFromStoreEntry: addChannelAllowFromStoreEntryMock,
+      upsertPairingRequest: upsertChannelPairingRequestMock,
+    });
+
+    expect(allowed).toBe(true);
+    expect(writeConfigFileMock).not.toHaveBeenCalled();
   });
 
   it("issues a pairing challenge for unauthorized DMs when pairing allowlist already has entries", async () => {

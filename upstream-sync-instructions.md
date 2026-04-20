@@ -201,23 +201,28 @@
 
 ### 11. `extensions/telegram/src/dm-access.test.ts`
 
-- 差异摘要：测试从“allowlist 为空时触发 pairing”改为区分两种情况：空 allowlist 自动加白；已有 allowlist 才触发 pairing。
-- 修改目的：把新的私聊访问控制策略表达清楚。
+- 差异摘要：测试从“allowlist 为空时触发 pairing”改为区分两种情况：空 allowlist 自动加白并自动写入 owner；已有 allowlist 才触发 pairing。
+- 修改目的：把新的私聊访问控制策略表达清楚，并覆盖“首个私聊发送者自动成为 owner”的 fork 定制行为。
 - 涉及功能 / 行为变化：
   - 空 allowlist + `pairing` 策略时，首个 DM 发送者会被直接写入 allowlist 并放行。
+  - 同一场景下，还会将 `telegram:<userId>` 追加写入 `commands.ownerAllowFrom`。
+  - 若 `commands.ownerAllowFrom` 已包含相同 `telegram:<userId>`，则不会重复写入。
   - 非空 allowlist + `pairing` 策略时，未授权用户仍然收到 pairing challenge。
 
 ### 12. `extensions/telegram/src/dm-access.ts`
 
-- 差异摘要：在 `pairing` 模式下新增“当 allowlist 为空时自动把首个私聊发送者加入 allowlist”的分支。
-- 修改目的：优化 bot 首次配置后的可用性，避免第一位管理员也被卡在 pairing 流程里。
+- 差异摘要：在 `pairing` 模式下新增“当 allowlist 为空时自动把首个私聊发送者加入 allowlist，并同时写入 owner 配置”的分支。
+- 修改目的：优化 bot 首次配置后的可用性，避免第一位管理员也被卡在 pairing 流程里，同时让首个私聊发送者立即具备 owner-only tool 权限。
 - 涉及功能 / 行为变化：
   - 私聊且 `dmPolicy === "pairing"` 且 allowlist 为空时：
-    - 读取发送者 Telegram user id。
-    - 写入 channel allowlist store。
-    - 记录日志。
-    - 直接放行，不发 pairing code。
-  - 如果自动加白失败，则继续走原有 pairing 逻辑。
+  - 读取发送者 Telegram user id。
+  - 写入 channel allowlist store。
+  - 读取当前配置并将 `telegram:<userId>` 追加到 `commands.ownerAllowFrom`（若尚不存在）。
+  - 记录 owner 自动写入成功日志。
+  - 记录日志。
+  - 直接放行，不发 pairing code。
+  - 如果 allowlist 自动写入失败，则继续走原有 pairing 逻辑。
+  - 如果 owner 配置写入失败，不影响当前首个 DM 放行主路径，但会落日志便于排查。
 
 ### 13. `package.json`
 
