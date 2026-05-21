@@ -1,23 +1,24 @@
 ---
 name: video-generate
-description: Compile a user video idea into structured JSON for directing intent, world state, timeline, shots, and final per-shot video prompts.
+description: Compile a user video idea into structured JSON and perform Wavespeed video rendering to output a final merged cinematic video.
 ---
 
 # Video Generate
 
-Use this skill when the user wants a natural-language idea turned into a complete video-generation plan and final shot prompts.
+Use this skill when the user wants a natural-language idea turned into a complete video-generation plan and a final merged cinematic video.
 
 If the request is usable as a non-empty goal, start immediately. Do not ask clarifying questions unless the request is fundamentally unusable. Infer missing cinematic details internally and complete the workflow end to end.
 
 ## Execution contract
 
-Execute the workflow as five **serial sub-tasks**:
+Execute the workflow as six **serial sub-tasks**:
 
 1. `narrative_plan`
 2. `world_state`
 3. `timeline`
 4. `shots`
 5. `prompts`
+6. `render_video`
 
 This sequencing is mandatory.
 
@@ -32,7 +33,7 @@ For each phase:
 
 - use the exact phase prompt text defined below
 - keep the phase input payload exactly aligned with the phase contract defined below
-- produce structured JSON only for that phase
+- produce structured JSON only for that phase when the phase is an LLM phase
 - do not skip phases even when the user input is extremely short
 
 If the user provides only a short goal, treat it as a single non-empty goal string.
@@ -86,9 +87,34 @@ After phase 4 is complete, run `prompts` using only:
 
 Output only the phase 5 JSON.
 
+### Step 6
+
+After phase 5 is complete, run `render_video`.
+
+Execution rules:
+
+- If the user already provided `WAVESPEED_API_KEY` in the current request, use it and save it for future runs.
+- Otherwise, prefer a previously saved `WAVESPEED_API_KEY` when available.
+- Only ask the user for `WAVESPEED_API_KEY` when neither the current request nor saved state provides one.
+- The first shot must use Wavespeed text-to-video at [`https://api.wavespeed.ai/api/v3/bytedance/seedance-2.0/text-to-video`](https://api.wavespeed.ai/api/v3/bytedance/seedance-2.0/text-to-video) with no `image` field.
+- Shot 2 and later must use Wavespeed image-to-video at [`https://api.wavespeed.ai/api/v3/bytedance/seedance-2.0/image-to-video`](https://api.wavespeed.ai/api/v3/bytedance/seedance-2.0/image-to-video).
+- For every shot after the first, extract the tail frame from the previous rendered clip, upload it to Litterbox at [`https://litterbox.catbox.moe/resources/internals/api.php`](https://litterbox.catbox.moe/resources/internals/api.php), and use the resulting public URL as the next shot’s `image`.
+- Render shots strictly serially in shot order.
+- Poll prediction status at [`https://api.wavespeed.ai/api/v3/predictions/{request_id}`](https://api.wavespeed.ai/api/v3/predictions/%7Brequest_id%7D) every 1-2 seconds until the status is `completed` or `failed`.
+- After completion, fetch the final render payload from [`https://api.wavespeed.ai/api/v3/predictions/{request_id}/result`](https://api.wavespeed.ai/api/v3/predictions/%7Brequest_id%7D/result).
+- Download every rendered shot video locally.
+- Concatenate all rendered shot clips into one final video.
+- Return the final video to the user.
+
+Use these bundled scripts for execution:
+
+- [`render_wavespeed.mjs`](skills/video-generate/scripts/render_wavespeed.mjs)
+- [`extract_last_frame.sh`](skills/video-generate/scripts/extract_last_frame.sh)
+- [`concat_videos.sh`](skills/video-generate/scripts/concat_videos.sh)
+
 ### Final assembly
 
-Only after all five serial sub-tasks are complete, assemble the final output object.
+Only after all required serial sub-tasks are complete, assemble the final output object.
 
 ## Phase prompts
 
@@ -671,9 +697,66 @@ Phase output schema:
 }
 ```
 
+### Phase 6: `render_video`
+
+This is an execution phase rather than an LLM schema-expansion phase.
+
+Run it as the default final execution phase.
+
+Required behavior:
+
+- Prefer a previously saved `WAVESPEED_API_KEY` when available.
+- If the current request includes `WAVESPEED_API_KEY`, use it and save it for future runs.
+- If no saved key is available and the user has not supplied one in the current request, ask for it before rendering.
+- Render strictly in prompt order.
+- Shot 1 uses text-to-video with no `image` field.
+- Shot 2 and later use image-to-video with the previous shot’s uploaded tail-frame URL as `image`.
+- Tail-frame extraction and video concatenation are performed with `ffmpeg` through the bundled scripts.
+- Tail-frame public upload uses Litterbox.
+- Persist render metadata so later steps can refer to per-shot `request_id`, clip path, and tail-frame URL.
+
+Recommended command shape:
+
+```bash
+node skills/video-generate/scripts/render_wavespeed.mjs phase5.json \
+  --metadata-output render-result.json \
+  --output-dir ./video-render-output \
+  --final-output ./final-video.mp4
+```
+
+Phase input payload:
+
+```json
+{
+  "goal": "<user goal>",
+  "prompts": [{ "shot_id": "shot_01", "prompt": "..." }]
+}
+```
+
+Phase output schema:
+
+```json
+{
+  "rendered_shots": [
+    {
+      "shot_id": "shot_01",
+      "request_id": "",
+      "status": "completed",
+      "video_url": "",
+      "tail_frame_url": ""
+    }
+  ],
+  "final_video": {
+    "status": "completed",
+    "local_path": "",
+    "artifact_url": ""
+  }
+}
+```
+
 ## Final assembled result
 
-Only after all five serial phases are complete, assemble the final result using this top-level structure:
+Only after all required serial phases are complete, assemble the final result using this top-level structure:
 
 ```json
 {
@@ -682,11 +765,17 @@ Only after all five serial phases are complete, assemble the final result using 
   "world_state": {},
   "timeline": [],
   "shots": [],
-  "prompts": []
+  "prompts": [],
+  "rendered_shots": [],
+  "final_video": {
+    "status": "",
+    "local_path": "",
+    "artifact_url": ""
+  }
 }
 ```
 
-Do not include `render_result` in the final skill output unless the user explicitly asks for placeholder render metadata. The useful deliverable for this skill is the compiled planning JSON and final prompts.
+The default deliverable includes render execution and final video output.
 
 ## Validation rules
 
@@ -694,6 +783,7 @@ Before finalizing, enforce these semantic checks:
 
 - every `shots[i].event_ref` must reference an existing `timeline[*].event_id`
 - every `prompts[i].shot_id` must reference an existing `shots[*].shot_id`
+- every `rendered_shots[i].shot_id` must reference an existing `prompts[*].shot_id`
 - preserve continuity across the full pipeline
 
 Also enforce these field-level constraints:
