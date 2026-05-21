@@ -108,7 +108,7 @@ Execution rules:
 
 Use these bundled scripts for execution:
 
-- [`render_wavespeed.mjs`](skills/video-generate/scripts/render_wavespeed.mjs)
+- [`render_wavespeed.py`](skills/video-generate/scripts/render_wavespeed.py)
 - [`extract_last_frame.sh`](skills/video-generate/scripts/extract_last_frame.sh)
 - [`concat_videos.sh`](skills/video-generate/scripts/concat_videos.sh)
 
@@ -718,7 +718,7 @@ Required behavior:
 Recommended command shape:
 
 ```bash
-node skills/video-generate/scripts/render_wavespeed.mjs phase5.json \
+python3 skills/video-generate/scripts/render_wavespeed.py phase5.json \
   --metadata-output render-result.json \
   --output-dir ./video-render-output \
   --final-output ./final-video.mp4
