@@ -104,6 +104,7 @@ Execution rules:
 - After completion, fetch the final render payload from [`https://api.wavespeed.ai/api/v3/predictions/{request_id}/result`](https://api.wavespeed.ai/api/v3/predictions/%7Brequest_id%7D/result).
 - Download every rendered shot video locally.
 - Concatenate all rendered shot clips into one final video.
+- Strictly forbid duplicate prompt submissions for the same shot.
 - Return the final video to the user.
 
 Use these bundled scripts for execution:
@@ -714,6 +715,7 @@ Required behavior:
 - Tail-frame extraction and video concatenation are performed with `ffmpeg` through the bundled scripts.
 - Tail-frame public upload uses Litterbox.
 - Persist render metadata so later steps can refer to per-shot `request_id`, clip path, and tail-frame URL.
+- Strictly forbid duplicate prompt submissions for the same shot.
 
 Recommended command shape:
 
