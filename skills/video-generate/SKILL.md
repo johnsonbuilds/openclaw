@@ -5,20 +5,21 @@ description: Generate a single video from a text prompt (and optional image) usi
 
 # Video Generate
 
-Generate a video from a user's natural-language description using Wavespeed AI. The skill handles prompt generation, API submission, polling, and delivering the final video to the user.
+Generate a video from a user's natural-language description using Wavespeed AI. The skill handles prompt generation, API submission, polling, and returning the video URL to the user.
 
 ## Workflow
 
 1. **Understand the request** — If the user provides only a short goal, expand it into a detailed video generation prompt. Infer cinematic details (scene, mood, action, style) from context. Do not ask clarifying questions unless the request is fundamentally unusable.
 
 2. **Determine parameters** — Extract or infer:
-   - **Model** — User can specify a model; default is `bytedance/seedance-2.0/text-to-video` for text-to-video or `bytedance/seedance-2.0/image-to-video` for image-to-video.
+   - **Model** — User can specify a model by name (e.g., "seedance 2.0" or "wan 2.7"). Look up the exact model ID by calling `GET https://api.wavespeed.ai/api/v3/models` and matching the user's name. Default is `bytedance/seedance-2.0/text-to-video` for text-to-video or `bytedance/seedance-2.0/image-to-video` for image-to-video.
    - **Prompt** — The text description for generation.
    - **Image (optional)** — If the user provides an image URL or file, use it as input for image-to-video.
    - **Duration** — Video length (default: 5 seconds, range: 1-20).
-   - **Resolution** — Default: `720p`. Options typically include `480p`, `720p`, `1080p`.
+   - **Resolution** — Default: `480p`. Options: `480p`, `720p`, `1080p`.
    - **Negative prompt (optional)** — Things to avoid in the video.
    - **Seed (optional)** — For reproducible results.
+   - **Aspect ratio (optional)** — e.g., `16:9`, `9:16`, `4:3`. Default: `16:9`.
    - **Webhook URL (optional)** — For async delivery.
 
 3. **Save API key** — If the user provides a `WAVESPEED_API_KEY`, save it. Prefer previously saved keys. Only ask when none is available.
@@ -27,20 +28,52 @@ Generate a video from a user's natural-language description using Wavespeed AI. 
 
 5. **Poll for results** — Check status every 1-2 seconds until `completed` or `failed`.
 
-6. **Retrieve and deliver** — Download the generated video and send it to the user.
+6. **Retrieve and deliver** — Return the video URL from `data.outputs[0]` to the user. **Do not download the video locally** — just return the URL so the user can download it directly.
+
+## Cost Inquiry
+
+If the user asks about the cost of generating a video:
+
+1. Fetch the pricing page for the specific model being used. The URL follows this pattern:
+   `https://wavespeed.ai/docs/docs-api/{provider}/{model-id-with-hyphens}-{generation-type}`
+
+   For example, for `bytedance/seedance-2.0/text-to-video`:
+   `https://wavespeed.ai/docs/docs-api/bytedance/bytedance-seedance-2.0-text-to-video`
+
+   Rules for building the URL:
+   - `{provider}`: the first segment of the model ID (e.g., `bytedance`)
+   - `{model-id-with-hyphens}`: the full model ID with `/` replaced by `-` (e.g., `bytedance-seedance-2.0`)
+   - `{generation-type}`: the last segment (e.g., `text-to-video`)
+
+2. Parse the pricing information from the page content.
+
+3. Calculate the exact cost based on the user's configured parameters (resolution, duration, reference images, etc.).
+
+4. Present the cost breakdown to the user clearly.
+
+## Deduplication
+
+**Do not re-submit the same prompt for the same user within the same session** unless the user explicitly asks to retry or make a new video. If the user's request produces the same prompt as a previous generation, return the existing result URL instead of creating a new task. This avoids unnecessary costs.
 
 ## API Reference
 
 ### Models
 
-The `{model-id}` path segment determines the model. Common video models:
+The `{model-id}` path segment determines the model. To look up model IDs, call:
 
-| Model | Model ID |
-|-------|----------|
-| Seedance 2.0 (text-to-video) | `bytedance/seedance-2.0/text-to-video` |
-| Seedance 2.0 (image-to-video) | `bytedance/seedance-2.0/image-to-video` |
+```
+GET https://api.wavespeed.ai/api/v3/models
+Headers:
+  Authorization: Bearer ${WAVESPEED_API_KEY}
+```
 
-Users can specify other models by providing the full model ID string (e.g., `bytedance/seedance-1.5-pro/text-to-video`).
+When the user names a model (e.g., "Seedance", "Wan", "Kling"), search the models API response to find the matching model ID. Extract the `name` field from each model entry. Common video models include:
+
+| User says | Likely model ID |
+|-----------|----------------|
+| seedance 2.0 / seedance | `bytedance/seedance-2.0/text-to-video` |
+| wan / wan 2.7 | (look up via API, e.g. `wavespeed-ai/wan-2.7/text-to-video`) |
+| kling | (look up via API) |
 
 When the user provides an image (URL or uploaded file), use the image-to-video variant of the model. Without an image, use text-to-video.
 
@@ -56,7 +89,7 @@ Body:
 {
   "prompt": "A cinematic shot of a cyberpunk city at night with neon lights",
   "duration": 5,
-  "resolution": "720p",
+  "resolution": "480p",
   "image": "https://..."  // optional, for image-to-video
 }
 ```
@@ -142,15 +175,19 @@ Headers:
 
 1. **Save API key** if provided. Use previously saved key when available. Ask only if none is available.
 
-2. **Build the prompt**: If the user gives a short idea ("a cat in space"), expand it into a detailed, render-friendly prompt with scene, lighting, camera movement, and mood.
+2. **Determine model**: If user names a model (like "wan" or "kling"), call `GET https://api.wavespeed.ai/api/v3/models` to find the exact model ID. Default is `bytedance/seedance-2.0/text-to-video`.
 
-3. **Submit** the task to the appropriate Wavespeed endpoint.
+3. **Build the prompt**: If the user gives a short idea ("a cat in space"), expand it into a detailed, render-friendly prompt with scene, lighting, camera movement, and mood.
 
-4. **Poll** `api.wavespeed.ai/api/v3/predictions/{task-id}` every 1-2 seconds until status is `completed` or `failed`.
+4. **Check for duplicates**: If the identical prompt + model + image combination was already submitted in this session, return the existing result URL instead of submitting again.
 
-5. **Download** the video from `data.outputs[0]` to a local file.
+5. **Submit** the task to the appropriate Wavespeed endpoint.
 
-6. **Send** the video file to the user.
+6. **Poll** `api.wavespeed.ai/api/v3/predictions/{task-id}` every 1-2 seconds until status is `completed` or `failed`.
+
+7. **Return the URL**: Give the user the video URL from `data.outputs[0]`. Do not download locally.
+
+8. **If user asks about cost**: Fetch `https://wavespeed.ai/docs/docs-api/{provider}/{model-id-with-hyphens}-{generation-type}`, parse pricing, and calculate the exact cost based on resolution and duration.
 
 ## Error Handling
 
