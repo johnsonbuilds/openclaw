@@ -27,7 +27,7 @@ Generate a video from a user's natural-language description using Wavespeed AI. 
    - **Aspect ratio (optional)** — e.g., `16:9`, `9:16`, `4:3`. Default: `16:9`.
    - **Webhook URL (optional)** — For async delivery.
 
-3. **Save API key** — If the user provides a `WAVESPEED_API_KEY`, save it. Prefer previously saved keys. Only ask when none is available.
+3. **Save API key** — If the user provides a `WAVESPEED_API_KEY`, save it. Prefer previously saved keys. Only ask when none is available. If the user asks how to get a Wavespeed API key, tell them to register/login at [https://wavespeed.ai/accesskey](https://wavespeed.ai/accesskey) to create one.
 
 4. **Present a summary and ask for confirmation** — Before submitting the task, present a clear summary of:
    - The generated prompt
