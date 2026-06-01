@@ -5,7 +5,7 @@ description: Generate a single video from a text prompt (and optional image) usi
 
 # Video Generate
 
-Generate a video from a user's natural-language description using Wavespeed AI. The skill handles prompt generation, API submission, polling, and returning the video URL to the user.
+Generate a video from a user's natural-language description using Wavespeed AI. The skill handles prompt generation, user confirmation, API submission, polling, and returning the video URL to the user.
 
 ## Workflow
 
@@ -13,10 +13,15 @@ Generate a video from a user's natural-language description using Wavespeed AI. 
 
 2. **Determine parameters** — Extract or infer:
    - **Model** — User can specify a model by name (e.g., "seedance 2.0" or "wan 2.7"). Look up the exact model ID by calling `GET https://api.wavespeed.ai/api/v3/models` and matching the user's name. Default is `bytedance/seedance-2.0/text-to-video` for text-to-video or `bytedance/seedance-2.0/image-to-video` for image-to-video.
-   - **Prompt** — The text description for generation.
+   - **Prompt** — Act as a professional AI video director. Generate a high-quality prompt containing the following elements:
+     - **Camera Language (镜头语言)** — Specify framing and movement (e.g., `Low-angle tracking shot`, `Close-up`, `Drone cinematic shot`).
+     - **Subject Details (主体细节)** — Use concrete nouns for appearance and materials. Avoid vague adjectives (e.g., `a futuristic astronaut with a weathered white spacesuit`).
+     - **Core Action (核心动作)** — Use dynamic verbs; control the intensity of motion (e.g., `walking with heavy steps`, `water splashing violently`).
+     - **Environment & Lighting (环境与光影)** — Specify time of day and dramatic lighting (e.g., `sunset, dramatic side lighting`, `neon-lit cyberpunk street`).
+     - **Style & Quality (画质与风格)** — Set cinematic feel and film texture (e.g., `35mm film texture`, `cinematic photorealistic`, `8K`, `cinematic lighting`).
    - **Image (optional)** — If the user provides an image URL or file, use it as input for image-to-video.
    - **Duration** — Video length (default: 5 seconds, range: 1-20).
-   - **Resolution** — Default: `480p`. Options: `480p`, `720p`, `1080p`.
+   - **Resolution** — Do **not** change resolution unless the user explicitly specifies it. Default: `480p`. Options: `480p`, `720p`, `1080p`.
    - **Negative prompt (optional)** — Things to avoid in the video.
    - **Seed (optional)** — For reproducible results.
    - **Aspect ratio (optional)** — e.g., `16:9`, `9:16`, `4:3`. Default: `16:9`.
@@ -24,11 +29,20 @@ Generate a video from a user's natural-language description using Wavespeed AI. 
 
 3. **Save API key** — If the user provides a `WAVESPEED_API_KEY`, save it. Prefer previously saved keys. Only ask when none is available.
 
-4. **Submit task** — Call Wavespeed API to submit the generation task.
+4. **Present a summary and ask for confirmation** — Before submitting the task, present a clear summary of:
+   - The generated prompt
+   - Model
+   - Resolution (note it as 480p default unless user specified otherwise)
+   - Duration
+   - Cost estimate (if calculated)
 
-5. **Poll for results** — Check status every 1-2 seconds until `completed` or `failed`.
+   Ask the user to confirm ("Looks good? Reply OK to submit"). Only proceed after the user confirms.
 
-6. **Retrieve and deliver** — Return the video URL from `data.outputs[0]` to the user. **Do not download the video locally** — just return the URL so the user can download it directly.
+5. **Submit task** — Call Wavespeed API to submit the generation task.
+
+6. **Poll for results** — Check status every 1-2 seconds until `completed` or `failed`.
+
+7. **Retrieve and deliver** — Return the video URL from `data.outputs[0]` to the user. **Do not download the video locally** — just return the URL so the user can download it directly.
 
 ## Cost Inquiry
 
@@ -87,7 +101,7 @@ Headers:
 
 Body:
 {
-  "prompt": "A cinematic shot of a cyberpunk city at night with neon lights",
+  "prompt": "Low-angle tracking shot of a futuristic astronaut with a weathered white spacesuit walking with heavy steps across a neon-lit cyberpunk street at sunset. Cinematic photorealistic, 35mm film texture, 8K, dramatic side lighting.",
   "duration": 5,
   "resolution": "480p",
   "image": "https://..."  // optional, for image-to-video
@@ -177,17 +191,24 @@ Headers:
 
 2. **Determine model**: If user names a model (like "wan" or "kling"), call `GET https://api.wavespeed.ai/api/v3/models` to find the exact model ID. Default is `bytedance/seedance-2.0/text-to-video`.
 
-3. **Build the prompt**: If the user gives a short idea ("a cat in space"), expand it into a detailed, render-friendly prompt with scene, lighting, camera movement, and mood.
+3. **Build the prompt**: Act as a professional AI video director. Take the user's idea and generate a detailed prompt incorporating:
+   - Camera Language & Movement (景别与运动)
+   - Concrete Subject Details (主体细节, no vague adjectives)
+   - Dynamic Core Action (核心动作)
+   - Environment & Lighting (环境与光影)
+   - Style & Quality (画质与风格: 35mm film texture, cinematic photorealistic, 8K, cinematic lighting)
 
 4. **Check for duplicates**: If the identical prompt + model + image combination was already submitted in this session, return the existing result URL instead of submitting again.
 
-5. **Submit** the task to the appropriate Wavespeed endpoint.
+5. **Present summary and ask for confirmation**: Show the user the generated prompt, model, resolution (480p unless user specified otherwise), duration, and cost estimate. Ask "Looks good? Reply OK to submit."
 
-6. **Poll** `api.wavespeed.ai/api/v3/predictions/{task-id}` every 1-2 seconds until status is `completed` or `failed`.
+6. **Only on user confirmation**: Submit the task to the appropriate Wavespeed endpoint.
 
-7. **Return the URL**: Give the user the video URL from `data.outputs[0]`. Do not download locally.
+7. **Poll** `api.wavespeed.ai/api/v3/predictions/{task-id}` every 1-2 seconds until status is `completed` or `failed`.
 
-8. **If user asks about cost**: Fetch `https://wavespeed.ai/docs/docs-api/{provider}/{model-id-with-hyphens}-{generation-type}`, parse pricing, and calculate the exact cost based on resolution and duration.
+8. **Return the URL**: Give the user the video URL from `data.outputs[0]`. Do not download locally.
+
+9. **If user asks about cost**: Fetch `https://wavespeed.ai/docs/docs-api/{provider}/{model-id-with-hyphens}-{generation-type}`, parse pricing, and calculate the exact cost based on resolution and duration.
 
 ## Error Handling
 
